@@ -1,0 +1,6 @@
+{
+  "server_path": "/absolute/path/to/Microsoft.CodeAnalysis.LanguageServer",
+  "solution_or_project_path": "/absolute/or/relative/path/to/your.sln",
+  "listen_host": "127.0.0.1",
+  "listen_port": 8765
+}
