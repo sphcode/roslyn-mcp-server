@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roslyn-mcp-server"
+version = "0.1.0"
+description = "Minimal Roslyn-backed MCP server prototype for C# navigation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+roslyn-mcp-server = "roslyn_mcp_server.main:main"
+roslyn-mcp-client = "roslyn_mcp_server.client_cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

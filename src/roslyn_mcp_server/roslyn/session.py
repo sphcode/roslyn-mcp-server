@@ -3,7 +3,8 @@ import subprocess
 import threading
 from pathlib import Path
 
-from roslyn_mcp_server.lsp_client import LspClient, LspError
+from roslyn_mcp_server.roslyn.lsp_adapter import LspClient, LspError
+from roslyn_mcp_server.roslyn.translators import path_to_uri
 
 
 def guess_csharp_design_time_path(server_path):
@@ -37,19 +38,11 @@ def guess_csharp_design_time_path(server_path):
     return None
 
 
-def detect_workspace_root(solution_or_project_path):
-    return solution_or_project_path.parent
-
-
-def path_to_uri(path):
-    return path.resolve().as_uri()
-
-
 class RoslynSession:
     def __init__(self, server_path, solution_or_project_path, log):
         self.server_path = Path(server_path).resolve()
         self.solution_or_project_path = Path(solution_or_project_path).resolve()
-        self.workspace_root = detect_workspace_root(self.solution_or_project_path)
+        self.workspace_root = self.solution_or_project_path.parent
         self.log = log
         self.process = None
         self.client = None
@@ -81,12 +74,14 @@ class RoslynSession:
                 timeout=60,
             )
             self.log("workspace/projectInitializationComplete", notification)
+            return True
         except LspError as exc:
             self.log("warning", str(exc))
             self.log(
                 "warning",
                 "Proceeding anyway. If navigation is empty, workspace load likely did not finish.",
             )
+            return False
 
     def definition(self, file_path, line, character):
         with self._lock:

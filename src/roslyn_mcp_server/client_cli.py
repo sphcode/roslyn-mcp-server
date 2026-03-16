@@ -4,7 +4,7 @@ import sys
 import urllib.error
 import urllib.request
 
-from roslyn_mcp_server.config_utils import load_server_config
+from roslyn_mcp_server.infrastructure.config import load_server_config
 
 
 def request_json(method, url, payload=None):
@@ -19,7 +19,7 @@ def request_json(method, url, payload=None):
         return json.loads(response.read().decode("utf-8"))
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Client for the local Roslyn bridge server")
     parser.add_argument("--config", default="config.json", help="Server config file")
     parser.add_argument("--host", help="Bridge host override")
@@ -45,11 +45,11 @@ def parse_args():
         default=True,
     )
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    args = parse_args(argv)
     config = load_server_config(args.config)
     host = args.host or config["listen_host"]
     port = args.port or config["listen_port"]
@@ -86,15 +86,14 @@ def main():
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         print(body, file=sys.stderr)
-        raise SystemExit(1) from exc
+        return 1
     except urllib.error.URLError as exc:
         print(f"Failed to connect to bridge server: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
+        return 1
 
     print(json.dumps(response, ensure_ascii=False, indent=2))
-    if not response.get("ok", False):
-        raise SystemExit(1)
+    return 0 if response.get("ok", False) else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

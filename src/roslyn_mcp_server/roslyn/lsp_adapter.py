@@ -1,6 +1,5 @@
 import json
 import queue
-import subprocess
 import threading
 import time
 from collections import defaultdict
