@@ -10,4 +10,6 @@ def handle(workspace_service, payload):
     result = workspace_service.open_solution(request)
     return {
         "workspace": str(result.workspace),
+        "status": result.status,
+        "last_error": result.last_error,
     }

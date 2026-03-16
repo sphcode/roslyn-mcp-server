@@ -14,5 +14,15 @@ def handle(source_service, payload):
     result = source_service.read_span(request)
     return {
         "file_path": str(result.file_path),
+        "range": {
+            "start": {
+                "line": request.start_line,
+                "character": request.start_character,
+            },
+            "end": {
+                "line": request.end_line,
+                "character": request.end_character,
+            },
+        },
         "text": result.text,
     }

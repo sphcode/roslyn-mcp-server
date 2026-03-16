@@ -6,6 +6,12 @@ from roslyn_mcp_server.application.models.requests import OpenSolutionRequest
 from roslyn_mcp_server.application.models.results import WorkspaceStatusResult
 
 
+class WorkspaceNotReadyError(RuntimeError):
+    def __init__(self, status_result: WorkspaceStatusResult):
+        super().__init__("Workspace is not ready for navigation")
+        self.status_result = status_result
+
+
 class WorkspaceService:
     def __init__(self, session, log):
         self.session = session
@@ -53,6 +59,12 @@ class WorkspaceService:
     def can_serve_navigation(self):
         with self._lock:
             return self._status in {"ready", "degraded"}
+
+    def ensure_navigation_ready(self):
+        status = self.health()
+        if status.status in {"ready", "degraded"}:
+            return status
+        raise WorkspaceNotReadyError(status)
 
     def _start_session(self):
         try:

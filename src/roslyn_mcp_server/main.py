@@ -8,7 +8,7 @@ from roslyn_mcp_server.mcp.server import RoslynMcpServer
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Run the local Roslyn MCP server")
+    parser = argparse.ArgumentParser(description="Run the Roslyn MCP stdio adapter")
     parser.add_argument(
         "config",
         nargs="?",

@@ -20,7 +20,7 @@ def request_json(method, url, payload=None):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Client for the local Roslyn bridge server")
+    parser = argparse.ArgumentParser(description="Client for the local Roslyn backend daemon")
     parser.add_argument("--config", default="config.json", help="Server config file")
     parser.add_argument("--host", help="Bridge host override")
     parser.add_argument("--port", type=int, help="Bridge port override")
