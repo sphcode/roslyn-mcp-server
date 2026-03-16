@@ -10,12 +10,20 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
 [project.scripts]
 roslyn-mcp-server = "roslyn_mcp_server.main:main"
+roslyn-mcp-backend = "roslyn_mcp_server.backend.server:main"
 roslyn-mcp-client = "roslyn_mcp_server.client_cli:main"
+roslyn-mcp-http-bridge = "roslyn_mcp_server.infrastructure.http_bridge:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

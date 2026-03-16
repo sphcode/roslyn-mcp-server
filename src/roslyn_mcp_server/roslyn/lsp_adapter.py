@@ -4,15 +4,18 @@ import threading
 import time
 from collections import defaultdict
 
+from roslyn_mcp_server.infrastructure.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class LspError(Exception):
     pass
 
 
 class LspClient:
-    def __init__(self, process, log):
+    def __init__(self, process):
         self.process = process
-        self.log = log
         self._next_id = 1
         self._write_lock = threading.Lock()
         self._pending = {}
@@ -95,7 +98,7 @@ class LspClient:
     def _send_message(self, message, label):
         body = json.dumps(message, ensure_ascii=False).encode("utf-8")
         header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
-        self.log(label, message)
+        logger.debug("%s %s", label, json.dumps(message, ensure_ascii=False))
         with self._write_lock:
             if self.process.stdin is None:
                 raise LspError("Server stdin is closed")
@@ -108,12 +111,12 @@ class LspClient:
             while True:
                 message = self._read_message()
                 if message is None:
-                    self.log("lsp", "Server closed stdout")
+                    logger.info("LSP server closed stdout")
                     break
-                self.log("server -> client", message)
+                logger.debug("server -> client %s", json.dumps(message, ensure_ascii=False))
                 self._handle_message(message)
         except Exception as exc:
-            self.log("lsp", f"Reader loop failed: {exc}")
+            logger.exception("LSP reader loop failed: %s", exc)
         finally:
             self._closed.set()
             with self._pending_lock:
@@ -135,7 +138,7 @@ class LspClient:
         for raw_line in iter(self.process.stderr.readline, b""):
             line = raw_line.decode("utf-8", errors="replace").rstrip()
             if line:
-                self.log("server stderr", line)
+                logger.info("server stderr: %s", line)
 
     def _handle_message(self, message):
         if "id" in message and ("result" in message or "error" in message):
@@ -144,7 +147,7 @@ class LspClient:
             if response_queue is not None:
                 response_queue.put(message)
             else:
-                self.log("lsp", f"No pending request for response id {message['id']}")
+                logger.warning("No pending request for response id %s", message["id"])
             return
 
         if "id" in message and "method" in message:
@@ -176,7 +179,7 @@ class LspClient:
         elif method == "window/showMessageRequest":
             result = None
         else:
-            self.log("lsp", f"Unhandled server request '{method}', replying with null")
+            logger.warning("Unhandled server request '%s', replying with null", method)
             result = None
 
         response = {
@@ -218,5 +221,5 @@ class LspClient:
                 return
             time.sleep(0.1)
 
-        self.log("lsp", "Server did not exit after shutdown; terminating process")
+        logger.warning("Server did not exit after shutdown; terminating process")
         self.process.terminate()

@@ -1,179 +1,302 @@
 import json
+import sys
 import threading
 import traceback
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from roslyn_mcp_server.application.services.navigation_service import NavigationService
-from roslyn_mcp_server.application.services.source_service import SourceService
-from roslyn_mcp_server.application.services.workspace_service import WorkspaceService
-from roslyn_mcp_server.mcp.tools import (
-    find_definition,
-    find_references,
-    open_solution,
-    read_span,
-    search_symbols,
-)
-from roslyn_mcp_server.roslyn.session import RoslynSession
+from roslyn_mcp_server.backend.client import BackendClient, BackendClientError
+from roslyn_mcp_server.infrastructure.logging import get_logger
 
-
-class RequestAlreadyHandled(Exception):
-    pass
+JSONRPC_VERSION = "2.0"
+logger = get_logger(__name__)
 
 
 class RoslynMcpServer:
-    def __init__(self, config, log):
+    def __init__(self, config):
         self.config = config
-        self.log = log
-        self.session = RoslynSession(
-            server_path=config["server_path"],
-            solution_or_project_path=config["solution_or_project_path"],
-            log=log,
+        self.backend_client = BackendClient(
+            host=config["listen_host"],
+            port=config["listen_port"],
         )
-        self.workspace_service = WorkspaceService(self.session, log)
-        self.navigation_service = NavigationService(self.session)
-        self.source_service = SourceService()
-        self.httpd = None
+        self._write_lock = threading.Lock()
+        self._running = True
+        self._protocol_version = None
+        self._tool_handlers = {
+            "health": self._call_health,
+            "find_definition": self._call_find_definition,
+            "find_references": self._call_find_references,
+            "read_span": self._call_read_span,
+        }
 
     def serve_forever(self):
-        self.httpd = ThreadingHTTPServer(
-            (self.config["listen_host"], self.config["listen_port"]),
-            self._build_handler(),
-        )
-        self.log(
-            "bridge",
-            f"Listening on http://{self.config['listen_host']}:{self.config['listen_port']}",
-        )
-        self.workspace_service.start()
         try:
-            self.httpd.serve_forever()
+            while self._running:
+                message = self._read_message()
+                if message is None:
+                    break
+                self._handle_message(message)
         finally:
             self.close()
 
     def close(self):
-        if self.httpd is not None:
-            self.httpd.server_close()
-            self.httpd = None
-        self.workspace_service.close()
+        self._running = False
 
-    def _build_handler(self):
-        server = self
+    def _handle_message(self, message):
+        logger.debug("mcp <- %s", json.dumps(message, ensure_ascii=False))
 
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, format_string, *args):
-                server.log("http", format_string % args)
+        if "id" in message and "method" in message:
+            self._handle_request(message)
+            return
 
-            def do_GET(self):
-                if self.path != "/health":
-                    self._write_json(404, {"ok": False, "error": "Not found"})
-                    return
+        if "method" in message:
+            self._handle_notification(message)
+            return
 
-                result = server.workspace_service.health()
-                self._write_json(
-                    200,
+        logger.warning("Ignoring unsupported MCP message shape: %s", message)
+
+    def _handle_request(self, message):
+        request_id = message["id"]
+        method = message["method"]
+        params = message.get("params") or {}
+
+        try:
+            if method == "initialize":
+                result = self._handle_initialize(params)
+            elif method == "ping":
+                result = {}
+            elif method == "tools/list":
+                result = {"tools": self._tool_definitions()}
+            elif method == "tools/call":
+                result = self._handle_tools_call(params)
+            else:
+                self._send_error(request_id, -32601, f"Method not found: {method}")
+                return
+        except Exception as exc:
+            self._send_error(
+                request_id,
+                -32000,
+                str(exc),
+                {"traceback": traceback.format_exc()},
+            )
+            return
+
+        self._send_result(request_id, result)
+
+    def _handle_notification(self, message):
+        method = message["method"]
+        if method in {"notifications/initialized", "notifications/cancelled"}:
+            return
+        logger.warning("Unhandled MCP notification: %s", method)
+
+    def _handle_initialize(self, params):
+        self._protocol_version = params.get("protocolVersion") or "2024-11-05"
+        return {
+            "protocolVersion": self._protocol_version,
+            "capabilities": {
+                "tools": {
+                    "listChanged": False,
+                }
+            },
+            "serverInfo": {
+                "name": "roslyn-mcp-server",
+                "version": "0.1.0",
+            },
+        }
+
+    def _handle_tools_call(self, params):
+        tool_name = params.get("name")
+        arguments = params.get("arguments") or {}
+        handler = self._tool_handlers.get(tool_name)
+        if handler is None:
+            return self._tool_error_result(
+                f"Unknown tool '{tool_name}'",
+                {"tool": tool_name},
+            )
+
+        try:
+            payload = handler(arguments)
+            return {
+                "content": [
                     {
-                        "ok": result.status != "failed",
-                        "workspace": str(result.workspace),
-                        "status": result.status,
-                        "last_error": result.last_error,
+                        "type": "text",
+                        "text": json.dumps(payload, ensure_ascii=False, indent=2),
+                    }
+                ],
+                "structuredContent": payload,
+                "isError": False,
+            }
+        except BackendClientError as exc:
+            payload = {"error": str(exc)}
+            return self._tool_error_result(str(exc), payload)
+        except Exception as exc:
+            payload = {
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            }
+            return self._tool_error_result(str(exc), payload)
+
+    def _call_health(self, _arguments):
+        response = self.backend_client.health()
+        return self._unwrap_backend_response(response)
+
+    def _call_find_definition(self, arguments):
+        response = self.backend_client.find_definition(
+            file_path=arguments["file_path"],
+            line=int(arguments["line"]),
+            character=int(arguments["character"]),
+        )
+        return self._unwrap_backend_response(response)
+
+    def _call_find_references(self, arguments):
+        response = self.backend_client.find_references(
+            file_path=arguments["file_path"],
+            line=int(arguments["line"]),
+            character=int(arguments["character"]),
+            include_declaration=bool(arguments.get("include_declaration", True)),
+        )
+        return self._unwrap_backend_response(response)
+
+    def _call_read_span(self, arguments):
+        response = self.backend_client.read_span(
+            file_path=arguments["file_path"],
+            start_line=int(arguments["start_line"]),
+            start_character=int(arguments["start_character"]),
+            end_line=int(arguments["end_line"]),
+            end_character=int(arguments["end_character"]),
+        )
+        return self._unwrap_backend_response(response)
+
+    def _tool_error_result(self, message, payload):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(payload, ensure_ascii=False, indent=2),
+                }
+            ],
+            "structuredContent": payload,
+            "isError": True,
+        }
+
+    def _unwrap_backend_response(self, response):
+        if response.get("ok", False):
+            payload = dict(response)
+            payload.pop("ok", None)
+            return payload
+        raise BackendClientError(json.dumps(response, ensure_ascii=False))
+
+    def _tool_definitions(self):
+        return [
+            {
+                "name": "health",
+                "description": "Return workspace health and Roslyn initialization status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "find_definition",
+                "description": "Find the definition location for a C# symbol at a 0-based LSP position.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string"},
+                        "line": {"type": "integer", "minimum": 0},
+                        "character": {"type": "integer", "minimum": 0},
                     },
-                )
-
-            def do_POST(self):
-                try:
-                    payload = self._read_json()
-                    if self.path == "/definition":
-                        self._ensure_navigation_ready()
-                        self._write_json(
-                            200,
-                            {"ok": True, **find_definition.handle(server.navigation_service, payload)},
-                        )
-                        return
-
-                    if self.path == "/references":
-                        self._ensure_navigation_ready()
-                        self._write_json(
-                            200,
-                            {"ok": True, **find_references.handle(server.navigation_service, payload)},
-                        )
-                        return
-
-                    if self.path == "/open-solution":
-                        self._write_json(
-                            200,
-                            {"ok": True, **open_solution.handle(server.workspace_service, payload)},
-                        )
-                        return
-
-                    if self.path == "/read-span":
-                        self._write_json(
-                            200,
-                            {"ok": True, **read_span.handle(server.source_service, payload)},
-                        )
-                        return
-
-                    if self.path == "/search-symbols":
-                        self._write_json(
-                            200,
-                            {"ok": True, **search_symbols.handle(server.navigation_service, payload)},
-                        )
-                        return
-
-                    if self.path == "/shutdown":
-                        self._write_json(200, {"ok": True})
-                        threading.Thread(
-                            target=self._shutdown_async,
-                            name="bridge-shutdown",
-                            daemon=True,
-                        ).start()
-                        return
-
-                    self._write_json(404, {"ok": False, "error": "Not found"})
-                except NotImplementedError as exc:
-                    self._write_json(501, {"ok": False, "error": str(exc)})
-                except RequestAlreadyHandled:
-                    return
-                except Exception as exc:
-                    self._write_json(
-                        500,
-                        {
-                            "ok": False,
-                            "error": str(exc),
-                            "traceback": traceback.format_exc(),
-                        },
-                    )
-
-            def _ensure_navigation_ready(self):
-                if server.workspace_service.can_serve_navigation():
-                    return
-
-                health = server.workspace_service.health()
-                self._write_json(
-                    503,
-                    {
-                        "ok": False,
-                        "error": "Workspace is not ready for navigation",
-                        "workspace": str(health.workspace),
-                        "status": health.status,
-                        "last_error": health.last_error,
+                    "required": ["file_path", "line", "character"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "find_references",
+                "description": "Find references for a C# symbol at a 0-based LSP position.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string"},
+                        "line": {"type": "integer", "minimum": 0},
+                        "character": {"type": "integer", "minimum": 0},
+                        "include_declaration": {"type": "boolean"},
                     },
-                )
-                raise RequestAlreadyHandled()
+                    "required": ["file_path", "line", "character"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "read_span",
+                "description": "Read a source span from disk using 0-based start and end positions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string"},
+                        "start_line": {"type": "integer", "minimum": 0},
+                        "start_character": {"type": "integer", "minimum": 0},
+                        "end_line": {"type": "integer", "minimum": 0},
+                        "end_character": {"type": "integer", "minimum": 0},
+                    },
+                    "required": [
+                        "file_path",
+                        "start_line",
+                        "start_character",
+                        "end_line",
+                        "end_character",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        ]
 
-            def _shutdown_async(self):
-                if server.httpd is not None:
-                    server.httpd.shutdown()
+    def _read_message(self):
+        input_stream = sys.stdin.buffer
+        headers = {}
+        while True:
+            line = input_stream.readline()
+            if not line:
+                return None
+            if line == b"\r\n":
+                break
+            decoded = line.decode("ascii", errors="replace").strip()
+            if ":" not in decoded:
+                continue
+            key, value = decoded.split(":", 1)
+            headers[key.strip().lower()] = value.strip()
 
-            def _read_json(self):
-                content_length = int(self.headers.get("Content-Length", "0"))
-                body = self.rfile.read(content_length) if content_length else b"{}"
-                return json.loads(body.decode("utf-8"))
+        content_length = int(headers["content-length"])
+        body = input_stream.read(content_length)
+        return json.loads(body.decode("utf-8"))
 
-            def _write_json(self, status_code, payload):
-                body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-                self.send_response(status_code)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+    def _send_result(self, request_id, result):
+        self._send_message(
+            {
+                "jsonrpc": JSONRPC_VERSION,
+                "id": request_id,
+                "result": result,
+            }
+        )
 
-        return Handler
+    def _send_error(self, request_id, code, message, data=None):
+        error = {
+            "code": code,
+            "message": message,
+        }
+        if data is not None:
+            error["data"] = data
+        self._send_message(
+            {
+                "jsonrpc": JSONRPC_VERSION,
+                "id": request_id,
+                "error": error,
+            }
+        )
+
+    def _send_message(self, message):
+        body = json.dumps(message, ensure_ascii=False).encode("utf-8")
+        header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+        logger.debug("mcp -> %s", json.dumps(message, ensure_ascii=False))
+        with self._write_lock:
+            output_stream = sys.stdout.buffer
+            output_stream.write(header)
+            output_stream.write(body)
+            output_stream.flush()

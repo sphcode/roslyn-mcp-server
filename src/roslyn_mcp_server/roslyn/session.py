@@ -3,8 +3,11 @@ import subprocess
 import threading
 from pathlib import Path
 
+from roslyn_mcp_server.infrastructure.logging import get_logger
 from roslyn_mcp_server.roslyn.lsp_adapter import LspClient, LspError
 from roslyn_mcp_server.roslyn.translators import path_to_uri
+
+logger = get_logger(__name__)
 
 
 def guess_csharp_design_time_path(server_path):
@@ -39,11 +42,10 @@ def guess_csharp_design_time_path(server_path):
 
 
 class RoslynSession:
-    def __init__(self, server_path, solution_or_project_path, log):
+    def __init__(self, server_path, solution_or_project_path):
         self.server_path = Path(server_path).resolve()
         self.solution_or_project_path = Path(solution_or_project_path).resolve()
         self.workspace_root = self.solution_or_project_path.parent
-        self.log = log
         self.process = None
         self.client = None
         self._documents = {}
@@ -54,7 +56,7 @@ class RoslynSession:
         log_dir.mkdir(parents=True, exist_ok=True)
 
         command = self._build_server_command(log_dir)
-        self.log("startup", {"command": command})
+        logger.info("Starting Roslyn session with command: %s", command)
 
         self.process = subprocess.Popen(
             command,
@@ -63,9 +65,9 @@ class RoslynSession:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        self.client = LspClient(self.process, self.log)
+        self.client = LspClient(self.process)
         initialize_result = self._initialize_client()
-        self.log("initialize result", initialize_result)
+        logger.info("Roslyn initialize result: %s", initialize_result)
         self._open_workspace()
 
         try:
@@ -73,13 +75,12 @@ class RoslynSession:
                 "workspace/projectInitializationComplete",
                 timeout=60,
             )
-            self.log("workspace/projectInitializationComplete", notification)
+            logger.info("Roslyn workspace/projectInitializationComplete: %s", notification)
             return True
         except LspError as exc:
-            self.log("warning", str(exc))
-            self.log(
-                "warning",
-                "Proceeding anyway. If navigation is empty, workspace load likely did not finish.",
+            logger.warning("%s", exc)
+            logger.warning(
+                "Proceeding anyway. If navigation is empty, workspace load likely did not finish."
             )
             return False
 
@@ -122,7 +123,7 @@ class RoslynSession:
                         {"textDocument": {"uri": document_uri}},
                     )
                 except Exception as exc:
-                    self.log("cleanup", f"didClose failed for {document_uri}: {exc}")
+                    logger.warning("didClose failed for %s: %s", document_uri, exc)
             self.client.shutdown()
         finally:
             self.client = None
@@ -151,11 +152,10 @@ class RoslynSession:
         csharp_design_time_path = guess_csharp_design_time_path(self.server_path)
         if csharp_design_time_path is not None:
             command.extend(["--csharpDesignTimePath", str(csharp_design_time_path)])
-            self.log("startup", f"Using --csharpDesignTimePath {csharp_design_time_path}")
+            logger.info("Using --csharpDesignTimePath %s", csharp_design_time_path)
         else:
-            self.log(
-                "startup",
-                "Could not infer --csharpDesignTimePath. Project load may fail for some server builds.",
+            logger.warning(
+                "Could not infer --csharpDesignTimePath. Project load may fail for some server builds."
             )
 
         return command
@@ -209,12 +209,12 @@ class RoslynSession:
 
         if suffix in {".sln", ".slnx"}:
             self.client.send_notification("solution/open", {"solution": uri})
-            self.log("workspace", f"Sent solution/open for {self.solution_or_project_path}")
+            logger.info("Sent solution/open for %s", self.solution_or_project_path)
             return
 
         if suffix == ".csproj":
             self.client.send_notification("project/open", {"projects": [uri]})
-            self.log("workspace", f"Sent project/open for {self.solution_or_project_path}")
+            logger.info("Sent project/open for %s", self.solution_or_project_path)
             return
 
         raise ValueError(

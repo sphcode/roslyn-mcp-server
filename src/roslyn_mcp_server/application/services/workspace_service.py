@@ -1,15 +1,22 @@
 import threading
-import traceback
 from pathlib import Path
 
 from roslyn_mcp_server.application.models.requests import OpenSolutionRequest
 from roslyn_mcp_server.application.models.results import WorkspaceStatusResult
+from roslyn_mcp_server.infrastructure.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class WorkspaceNotReadyError(RuntimeError):
+    def __init__(self, status_result: WorkspaceStatusResult):
+        super().__init__("Workspace is not ready for navigation")
+        self.status_result = status_result
 
 
 class WorkspaceService:
-    def __init__(self, session, log):
+    def __init__(self, session):
         self.session = session
-        self.log = log
         self._lock = threading.Lock()
         self._status = "stopped"
         self._last_error = None
@@ -54,6 +61,12 @@ class WorkspaceService:
         with self._lock:
             return self._status in {"ready", "degraded"}
 
+    def ensure_navigation_ready(self):
+        status = self.health()
+        if status.status in {"ready", "degraded"}:
+            return status
+        raise WorkspaceNotReadyError(status)
+
     def _start_session(self):
         try:
             workspace_ready = self.session.start()
@@ -64,8 +77,7 @@ class WorkspaceService:
                         "Timed out waiting for workspace/projectInitializationComplete"
                     )
         except Exception as exc:
-            self.log("fatal", f"Workspace startup failed: {exc}")
-            self.log("fatal", traceback.format_exc())
+            logger.exception("Workspace startup failed: %s", exc)
             with self._lock:
                 self._status = "failed"
                 self._last_error = str(exc)
