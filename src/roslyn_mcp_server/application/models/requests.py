@@ -28,6 +28,11 @@ class SearchSymbolsRequest:
 
 
 @dataclass(frozen=True)
+class TextDocumentRequest:
+    file_path: Path
+
+
+@dataclass(frozen=True)
 class ReadSpanRequest:
     file_path: Path
     start_line: int

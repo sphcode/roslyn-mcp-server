@@ -14,7 +14,9 @@ from roslyn_mcp_server.application.services.workspace_service import (
 from roslyn_mcp_server.infrastructure.config import load_server_config
 from roslyn_mcp_server.infrastructure.logging import configure_logging, get_logger
 from roslyn_mcp_server.mcp.tools import (
+    document_symbols,
     find_definition,
+    find_implementations,
     find_references,
     health,
     open_solution,
@@ -105,6 +107,34 @@ class BackendServer:
                         )
                         return
 
+                    if self.path == "/implementations":
+                        self._write_json(
+                            200,
+                            {
+                                "ok": True,
+                                **find_implementations.handle(
+                                    server.workspace_service,
+                                    server.navigation_service,
+                                    payload,
+                                ),
+                            },
+                        )
+                        return
+
+                    if self.path == "/document-symbols":
+                        self._write_json(
+                            200,
+                            {
+                                "ok": True,
+                                **document_symbols.handle(
+                                    server.workspace_service,
+                                    server.navigation_service,
+                                    payload,
+                                ),
+                            },
+                        )
+                        return
+
                     if self.path == "/open-solution":
                         self._write_json(
                             200,
@@ -122,7 +152,14 @@ class BackendServer:
                     if self.path == "/search-symbols":
                         self._write_json(
                             200,
-                            {"ok": True, **search_symbols.handle(server.navigation_service, payload)},
+                            {
+                                "ok": True,
+                                **search_symbols.handle(
+                                    server.workspace_service,
+                                    server.navigation_service,
+                                    payload,
+                                ),
+                            },
                         )
                         return
 

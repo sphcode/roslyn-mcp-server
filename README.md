@@ -5,7 +5,7 @@ Roslyn-backed MCP adapter for C# navigation.
 Architecture:
 - `backend daemon`
   - Owns the Roslyn process and workspace state.
-  - Exposes a local HTTP API for `health`, `find_definition`, `find_references`, and `read_span`.
+  - Exposes a local HTTP API for `health`, `find_definition`, `find_references`, `find_implementations`, `document_symbols`, `search_symbols`, and `read_span`.
 - `MCP stdio adapter`
   - Does not own Roslyn state.
   - Receives MCP tool calls and forwards them to the backend daemon.
@@ -25,6 +25,9 @@ MCP tools:
 - `health`
 - `find_definition`
 - `find_references`
+- `find_implementations`
+- `document_symbols`
+- `search_symbols`
 - `read_span`
 
 Coordinate system:
@@ -48,3 +51,13 @@ Structure:
 - `src/roslyn_mcp_server/roslyn/`: Roslyn session and LSP adapter
 - `src/roslyn_mcp_server/infrastructure/`: config, logging, and compatibility wrapper for the old HTTP bridge path
 - `scripts/client.py`: local CLI wrapper for the backend daemon
+
+Examples:
+- Start the backend:
+  - `PYTHONPATH=src python3 -m roslyn_mcp_server.backend.server config.json`
+- Search workspace symbols:
+  - `PYTHONPATH=src python3 -m roslyn_mcp_server.client_cli --config config.json search-symbols --query IDataContractCalculator`
+- List document symbols:
+  - `PYTHONPATH=src python3 -m roslyn_mcp_server.client_cli --config config.json document-symbols --file /absolute/path/to/file.cs`
+- Find implementations from an interface or abstract member position:
+  - `PYTHONPATH=src python3 -m roslyn_mcp_server.client_cli --config config.json implementations --file /absolute/path/to/file.cs --line 10 --character 15`

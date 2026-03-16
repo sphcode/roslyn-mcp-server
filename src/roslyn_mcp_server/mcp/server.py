@@ -24,6 +24,9 @@ class RoslynMcpServer:
             "health": self._call_health,
             "find_definition": self._call_find_definition,
             "find_references": self._call_find_references,
+            "find_implementations": self._call_find_implementations,
+            "document_symbols": self._call_document_symbols,
+            "search_symbols": self._call_search_symbols,
             "read_span": self._call_read_span,
         }
 
@@ -155,6 +158,26 @@ class RoslynMcpServer:
         )
         return self._unwrap_backend_response(response)
 
+    def _call_find_implementations(self, arguments):
+        response = self.backend_client.find_implementations(
+            file_path=arguments["file_path"],
+            line=int(arguments["line"]),
+            character=int(arguments["character"]),
+        )
+        return self._unwrap_backend_response(response)
+
+    def _call_document_symbols(self, arguments):
+        response = self.backend_client.document_symbols(
+            file_path=arguments["file_path"],
+        )
+        return self._unwrap_backend_response(response)
+
+    def _call_search_symbols(self, arguments):
+        response = self.backend_client.search_symbols(
+            query=arguments["query"],
+        )
+        return self._unwrap_backend_response(response)
+
     def _call_read_span(self, arguments):
         response = self.backend_client.read_span(
             file_path=arguments["file_path"],
@@ -221,6 +244,44 @@ class RoslynMcpServer:
                         "include_declaration": {"type": "boolean"},
                     },
                     "required": ["file_path", "line", "character"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "find_implementations",
+                "description": "Find implementation locations for a C# symbol at a 0-based LSP position.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string"},
+                        "line": {"type": "integer", "minimum": 0},
+                        "character": {"type": "integer", "minimum": 0},
+                    },
+                    "required": ["file_path", "line", "character"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "document_symbols",
+                "description": "List symbols declared in a C# document.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string"},
+                    },
+                    "required": ["file_path"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "search_symbols",
+                "description": "Search workspace symbols by name.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                    },
+                    "required": ["query"],
                     "additionalProperties": False,
                 },
             },
