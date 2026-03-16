@@ -12,7 +12,7 @@ from roslyn_mcp_server.application.services.workspace_service import (
     WorkspaceService,
 )
 from roslyn_mcp_server.infrastructure.config import load_server_config
-from roslyn_mcp_server.infrastructure.logging import log
+from roslyn_mcp_server.infrastructure.logging import configure_logging, get_logger
 from roslyn_mcp_server.mcp.tools import (
     find_definition,
     find_references,
@@ -23,17 +23,17 @@ from roslyn_mcp_server.mcp.tools import (
 )
 from roslyn_mcp_server.roslyn.session import RoslynSession
 
+logger = get_logger(__name__)
+
 
 class BackendServer:
-    def __init__(self, config, log_func):
+    def __init__(self, config):
         self.config = config
-        self.log = log_func
         self.session = RoslynSession(
             server_path=config["server_path"],
             solution_or_project_path=config["solution_or_project_path"],
-            log=log_func,
         )
-        self.workspace_service = WorkspaceService(self.session, log_func)
+        self.workspace_service = WorkspaceService(self.session)
         self.navigation_service = NavigationService(self.session)
         self.source_service = SourceService()
         self.httpd = None
@@ -43,9 +43,10 @@ class BackendServer:
             (self.config["listen_host"], self.config["listen_port"]),
             self._build_handler(),
         )
-        self.log(
-            "backend",
-            f"Listening on http://{self.config['listen_host']}:{self.config['listen_port']}",
+        logger.info(
+            "Backend listening on http://%s:%s",
+            self.config["listen_host"],
+            self.config["listen_port"],
         )
         self.workspace_service.start()
         try:
@@ -64,7 +65,7 @@ class BackendServer:
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, format_string, *args):
-                server.log("http", format_string % args)
+                logger.info("http: %s", format_string % args)
 
             def do_GET(self):
                 if self.path != "/health":
@@ -190,13 +191,13 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    configure_logging()
     args = parse_args(argv if argv is not None else sys.argv[1:])
     try:
-        server = BackendServer(load_server_config(args.config), log)
+        server = BackendServer(load_server_config(args.config))
         server.serve_forever()
     except Exception as exc:
-        log("fatal", str(exc))
-        traceback.print_exc(file=sys.stderr)
+        logger.exception("Failed to run backend daemon: %s", exc)
         return 1
     return 0
 

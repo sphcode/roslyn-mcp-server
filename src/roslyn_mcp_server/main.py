@@ -1,10 +1,11 @@
 import argparse
 import sys
-import traceback
 
 from roslyn_mcp_server.infrastructure.config import load_server_config
-from roslyn_mcp_server.infrastructure.logging import log
+from roslyn_mcp_server.infrastructure.logging import configure_logging, get_logger
 from roslyn_mcp_server.mcp.server import RoslynMcpServer
+
+logger = get_logger(__name__)
 
 
 def parse_args(argv=None):
@@ -19,13 +20,13 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    configure_logging()
     args = parse_args(argv if argv is not None else sys.argv[1:])
     try:
-        server = RoslynMcpServer(load_server_config(args.config), log)
+        server = RoslynMcpServer(load_server_config(args.config))
         server.serve_forever()
     except Exception as exc:
-        log("fatal", str(exc))
-        traceback.print_exc()
+        logger.exception("Failed to run MCP adapter: %s", exc)
         return 1
     return 0
 

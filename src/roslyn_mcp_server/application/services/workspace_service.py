@@ -1,9 +1,11 @@
 import threading
-import traceback
 from pathlib import Path
 
 from roslyn_mcp_server.application.models.requests import OpenSolutionRequest
 from roslyn_mcp_server.application.models.results import WorkspaceStatusResult
+from roslyn_mcp_server.infrastructure.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class WorkspaceNotReadyError(RuntimeError):
@@ -13,9 +15,8 @@ class WorkspaceNotReadyError(RuntimeError):
 
 
 class WorkspaceService:
-    def __init__(self, session, log):
+    def __init__(self, session):
         self.session = session
-        self.log = log
         self._lock = threading.Lock()
         self._status = "stopped"
         self._last_error = None
@@ -76,8 +77,7 @@ class WorkspaceService:
                         "Timed out waiting for workspace/projectInitializationComplete"
                     )
         except Exception as exc:
-            self.log("fatal", f"Workspace startup failed: {exc}")
-            self.log("fatal", traceback.format_exc())
+            logger.exception("Workspace startup failed: %s", exc)
             with self._lock:
                 self._status = "failed"
                 self._last_error = str(exc)

@@ -4,14 +4,15 @@ import threading
 import traceback
 
 from roslyn_mcp_server.backend.client import BackendClient, BackendClientError
+from roslyn_mcp_server.infrastructure.logging import get_logger
 
 JSONRPC_VERSION = "2.0"
+logger = get_logger(__name__)
 
 
 class RoslynMcpServer:
-    def __init__(self, config, log):
+    def __init__(self, config):
         self.config = config
-        self.log = log
         self.backend_client = BackendClient(
             host=config["listen_host"],
             port=config["listen_port"],
@@ -40,7 +41,7 @@ class RoslynMcpServer:
         self._running = False
 
     def _handle_message(self, message):
-        self.log("mcp <-", message)
+        logger.debug("mcp <- %s", json.dumps(message, ensure_ascii=False))
 
         if "id" in message and "method" in message:
             self._handle_request(message)
@@ -50,7 +51,7 @@ class RoslynMcpServer:
             self._handle_notification(message)
             return
 
-        self.log("warning", f"Ignoring unsupported MCP message shape: {message}")
+        logger.warning("Ignoring unsupported MCP message shape: %s", message)
 
     def _handle_request(self, message):
         request_id = message["id"]
@@ -84,7 +85,7 @@ class RoslynMcpServer:
         method = message["method"]
         if method in {"notifications/initialized", "notifications/cancelled"}:
             return
-        self.log("warning", f"Unhandled MCP notification: {method}")
+        logger.warning("Unhandled MCP notification: %s", method)
 
     def _handle_initialize(self, params):
         self._protocol_version = params.get("protocolVersion") or "2024-11-05"
@@ -293,7 +294,7 @@ class RoslynMcpServer:
     def _send_message(self, message):
         body = json.dumps(message, ensure_ascii=False).encode("utf-8")
         header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
-        self.log("mcp ->", message)
+        logger.debug("mcp -> %s", json.dumps(message, ensure_ascii=False))
         with self._write_lock:
             output_stream = sys.stdout.buffer
             output_stream.write(header)
