@@ -37,6 +37,35 @@ class BackendClient:
             },
         )
 
+    def find_implementations(self, file_path, line, character):
+        return self._request_json(
+            "POST",
+            "/implementations",
+            {
+                "file_path": file_path,
+                "line": line,
+                "character": character,
+            },
+        )
+
+    def document_symbols(self, file_path):
+        return self._request_json(
+            "POST",
+            "/document-symbols",
+            {
+                "file_path": file_path,
+            },
+        )
+
+    def search_symbols(self, query):
+        return self._request_json(
+            "POST",
+            "/search-symbols",
+            {
+                "query": query,
+            },
+        )
+
     def read_span(
         self,
         file_path,

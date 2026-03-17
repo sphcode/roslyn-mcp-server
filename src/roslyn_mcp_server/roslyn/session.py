@@ -111,6 +111,41 @@ class RoslynSession:
                 timeout=30,
             )
 
+    def implementations(self, file_path, line, character):
+        with self._lock:
+            file_path = Path(file_path).resolve()
+            self._sync_document(file_path)
+            return self.client.send_request(
+                "textDocument/implementation",
+                {
+                    "textDocument": {"uri": path_to_uri(file_path)},
+                    "position": {"line": line, "character": character},
+                },
+                timeout=30,
+            )
+
+    def document_symbols(self, file_path):
+        with self._lock:
+            file_path = Path(file_path).resolve()
+            self._sync_document(file_path)
+            return self.client.send_request(
+                "textDocument/documentSymbol",
+                {
+                    "textDocument": {"uri": path_to_uri(file_path)},
+                },
+                timeout=30,
+            )
+
+    def search_symbols(self, query):
+        with self._lock:
+            return self.client.send_request(
+                "workspace/symbol",
+                {
+                    "query": query,
+                },
+                timeout=30,
+            )
+
     def close(self):
         if self.client is None:
             return
@@ -181,6 +216,7 @@ class RoslynSession:
                     "workspaceFolders": True,
                     "configuration": True,
                     "applyEdit": True,
+                    "symbol": {},
                 },
                 "window": {
                     "workDoneProgress": True,
@@ -189,7 +225,11 @@ class RoslynSession:
                     "definition": {
                         "linkSupport": True,
                     },
+                    "implementation": {
+                        "linkSupport": True,
+                    },
                     "references": {},
+                    "documentSymbol": {},
                     "publishDiagnostics": {
                         "relatedInformation": True,
                     },

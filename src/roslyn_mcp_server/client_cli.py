@@ -1,22 +1,9 @@
 import argparse
 import json
 import sys
-import urllib.error
-import urllib.request
 
+from roslyn_mcp_server.backend.client import BackendClient, BackendClientError
 from roslyn_mcp_server.infrastructure.config import load_server_config
-
-
-def request_json(method, url, payload=None):
-    body = None
-    headers = {}
-    if payload is not None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers["Content-Type"] = "application/json; charset=utf-8"
-
-    request = urllib.request.Request(url, data=body, headers=headers, method=method)
-    with urllib.request.urlopen(request) as response:
-        return json.loads(response.read().decode("utf-8"))
 
 
 def parse_args(argv=None):
@@ -45,6 +32,17 @@ def parse_args(argv=None):
         default=True,
     )
 
+    implementations_parser = subparsers.add_parser("implementations")
+    implementations_parser.add_argument("--file", required=True)
+    implementations_parser.add_argument("--line", required=True, type=int)
+    implementations_parser.add_argument("--character", required=True, type=int)
+
+    document_symbols_parser = subparsers.add_parser("document-symbols")
+    document_symbols_parser.add_argument("--file", required=True)
+
+    search_symbols_parser = subparsers.add_parser("search-symbols")
+    search_symbols_parser.add_argument("--query", required=True)
+
     return parser.parse_args(argv)
 
 
@@ -53,42 +51,40 @@ def main(argv=None):
     config = load_server_config(args.config)
     host = args.host or config["listen_host"]
     port = args.port or config["listen_port"]
-    base_url = f"http://{host}:{port}"
+    client = BackendClient(host=host, port=port)
 
     try:
         if args.command == "health":
-            response = request_json("GET", f"{base_url}/health")
+            response = client.health()
         elif args.command == "shutdown":
-            response = request_json("POST", f"{base_url}/shutdown", {})
+            response = client.shutdown()
         elif args.command == "definition":
-            response = request_json(
-                "POST",
-                f"{base_url}/definition",
-                {
-                    "file_path": args.file,
-                    "line": args.line,
-                    "character": args.character,
-                },
+            response = client.find_definition(
+                file_path=args.file,
+                line=args.line,
+                character=args.character,
             )
         elif args.command == "references":
-            response = request_json(
-                "POST",
-                f"{base_url}/references",
-                {
-                    "file_path": args.file,
-                    "line": args.line,
-                    "character": args.character,
-                    "include_declaration": args.include_declaration,
-                },
+            response = client.find_references(
+                file_path=args.file,
+                line=args.line,
+                character=args.character,
+                include_declaration=args.include_declaration,
             )
+        elif args.command == "implementations":
+            response = client.find_implementations(
+                file_path=args.file,
+                line=args.line,
+                character=args.character,
+            )
+        elif args.command == "document-symbols":
+            response = client.document_symbols(file_path=args.file)
+        elif args.command == "search-symbols":
+            response = client.search_symbols(query=args.query)
         else:
             raise ValueError(f"Unsupported command {args.command}")
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        print(body, file=sys.stderr)
-        return 1
-    except urllib.error.URLError as exc:
-        print(f"Failed to connect to bridge server: {exc}", file=sys.stderr)
+    except BackendClientError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
     print(json.dumps(response, ensure_ascii=False, indent=2))
