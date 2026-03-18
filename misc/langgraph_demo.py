@@ -1,7 +1,13 @@
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
 import argparse
 import json
-import sys
-import time
 
 from roslyn_mcp_server.backend.client import BackendClient, BackendClientError
 from roslyn_mcp_server.infrastructure.config import load_server_config
@@ -58,6 +64,8 @@ def _unwrap_backend_response(response):
 
 
 def _call_backend_tool(tool_name, operation, *, retry_on_empty=False):
+    import time
+
     last_payload = None
     for attempt in range(1, 4):
         payload = _unwrap_backend_response(operation())
@@ -264,10 +272,7 @@ def main(argv=None):
         return 1
 
     if not demo_config.get("api_key"):
-        print(
-            "langgraph_demo.api_key is not set in config.json.",
-            file=sys.stderr,
-        )
+        print("langgraph_demo.api_key is not set in config.json.", file=sys.stderr)
         return 1
 
     try:

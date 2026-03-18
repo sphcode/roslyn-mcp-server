@@ -22,8 +22,6 @@ Entrypoints:
   - Runs the MCP stdio adapter.
 - `roslyn-mcp-client --config config.json health`
   - Calls the backend daemon directly over HTTP.
-- `roslyn-mcp-langgraph-demo --config config.json`
-  - Runs a minimal LangGraph-based agent demo against the backend daemon.
 
 MCP tools:
 - `health`
@@ -54,7 +52,6 @@ Structure:
 - `src/roslyn_mcp_server/application/`: services and request/result models
 - `src/roslyn_mcp_server/roslyn/`: Roslyn session and LSP adapter
 - `src/roslyn_mcp_server/infrastructure/`: config, logging, and compatibility wrapper for the old HTTP bridge path
-- `scripts/client.py`: local CLI wrapper for the backend daemon
 
 Examples:
 - Start the backend:
@@ -66,16 +63,5 @@ Examples:
 - Find implementations from an interface or abstract member position:
   - `PYTHONPATH=src python3 -m roslyn_mcp_server.client_cli --config config.json implementations --file /absolute/path/to/file.cs --line 10 --character 15`
 - Run the LangGraph demo:
-  - `roslyn-mcp-langgraph-demo --config config.json`
+  - `python3 misc/langgraph_demo.py --config config.json`
   - Then type your prompt in the terminal when you see `Prompt>`.
-
-LangGraph demo notes:
-- The demo uses `langchain.agents.create_agent`, which runs on LangGraph.
-- It connects to the existing backend daemon over local HTTP. Start `roslyn-mcp-backend` first.
-- It uses `langchain_openai.ChatOpenAI`.
-- LangGraph model config comes from `config.json` under `langgraph_demo`.
-- Prompt is entered interactively in the terminal, not passed as a CLI argument.
-- System prompt is hardcoded in [langgraph_demo.py](/Users/sunpuhua/now/work/statestreet/roslyn/src/roslyn_mcp_server/langgraph_demo.py).
-- `langgraph_demo.model` defaults to `gpt-4.1-mini` if omitted.
-- `langgraph_demo.api_key` must be set in `config.json`.
-- `langgraph_demo.base_url` is optional and is where you put an OpenAI-compatible proxy endpoint.
