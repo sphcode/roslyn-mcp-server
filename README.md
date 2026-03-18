@@ -64,4 +64,5 @@ Examples:
   - `PYTHONPATH=src python3 -m roslyn_mcp_server.client_cli --config config.json implementations --file /absolute/path/to/file.cs --line 10 --character 15`
 - Run the LangGraph demo:
   - `python3 misc/langgraph_demo.py --config config.json`
-  - Then type your prompt in the terminal when you see `Prompt>`.
+  - Then chat continuously in the terminal when you see `Prompt>`.
+  - Use `/reset` to clear context and `/exit` to quit.

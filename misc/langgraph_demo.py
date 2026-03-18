@@ -220,8 +220,7 @@ def _read_prompt():
     return prompt
 
 
-def _print_messages(result):
-    messages = result.get("messages", [])
+def _print_messages(messages):
     for message in messages:
         if hasattr(message, "pretty_print"):
             message.pretty_print()
@@ -240,6 +239,39 @@ def _print_messages(result):
         else:
             print(content)
         print()
+
+
+def _run_repl(agent):
+    state = {"messages": []}
+
+    while True:
+        try:
+            prompt = _read_prompt()
+        except EOFError:
+            print("\nExiting.", file=sys.stderr)
+            return 0
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            continue
+
+        if prompt in {"exit", "quit", "/exit", "/quit"}:
+            return 0
+
+        if prompt == "/reset":
+            state = {"messages": []}
+            print("[system]\nConversation state reset.\n")
+            continue
+
+        previous_count = len(state["messages"])
+        state["messages"].append({"role": "user", "content": prompt})
+
+        try:
+            state = agent.invoke(state)
+        except Exception as exc:
+            print(f"LangGraph demo failed: {exc}", file=sys.stderr)
+            continue
+
+        _print_messages(state.get("messages", [])[previous_count:])
 
 
 def main(argv=None):
@@ -275,12 +307,6 @@ def main(argv=None):
         print("langgraph_demo.api_key is not set in config.json.", file=sys.stderr)
         return 1
 
-    try:
-        prompt = _read_prompt()
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
     model = ChatOpenAI(
         model=demo_config["model"],
         temperature=0,
@@ -292,24 +318,8 @@ def main(argv=None):
         tools=build_tools(client),
         system_prompt=SYSTEM_PROMPT,
     )
-
-    try:
-        result = agent.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ]
-            }
-        )
-    except Exception as exc:
-        print(f"LangGraph demo failed: {exc}", file=sys.stderr)
-        return 1
-
-    _print_messages(result)
-    return 0
+    print("Interactive chat started. Use /reset to clear context, /exit to quit.")
+    return _run_repl(agent)
 
 
 if __name__ == "__main__":
