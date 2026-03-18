@@ -110,9 +110,10 @@ class RoslynMcpServer:
         arguments = params.get("arguments") or {}
         handler = self._tool_handlers.get(tool_name)
         if handler is None:
-            return self._tool_error_result(
-                f"Unknown tool '{tool_name}'",
-                {"tool": tool_name},
+            return self._tool_failure_result(
+                error_type="unknown_tool",
+                message=f"Unknown tool '{tool_name}'",
+                details={"tool": tool_name},
             )
 
         try:
@@ -128,14 +129,17 @@ class RoslynMcpServer:
                 "isError": False,
             }
         except BackendClientError as exc:
-            payload = {"error": str(exc)}
-            return self._tool_error_result(str(exc), payload)
+            logger.warning("Tool '%s' failed with backend error: %s", tool_name, exc)
+            return self._tool_failure_result(
+                error_type="backend_error",
+                message=str(exc),
+            )
         except Exception as exc:
-            payload = {
-                "error": str(exc),
-                "traceback": traceback.format_exc(),
-            }
-            return self._tool_error_result(str(exc), payload)
+            logger.exception("Tool '%s' failed with unexpected error: %s", tool_name, exc)
+            return self._tool_failure_result(
+                error_type="tool_execution_error",
+                message=str(exc),
+            )
 
     def _call_health(self, _arguments):
         response = self.backend_client.health()
@@ -188,7 +192,16 @@ class RoslynMcpServer:
         )
         return self._unwrap_backend_response(response)
 
-    def _tool_error_result(self, message, payload):
+    def _tool_failure_result(self, error_type, message, details=None):
+        payload = {
+            "ok": False,
+            "error": {
+                "type": error_type,
+                "message": message,
+            },
+        }
+        if details:
+            payload["error"]["details"] = details
         return {
             "content": [
                 {
@@ -197,7 +210,7 @@ class RoslynMcpServer:
                 }
             ],
             "structuredContent": payload,
-            "isError": True,
+            "isError": False,
         }
 
     def _unwrap_backend_response(self, response):
