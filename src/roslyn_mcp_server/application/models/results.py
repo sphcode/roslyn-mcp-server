@@ -18,4 +18,8 @@ class NavigationResult:
 @dataclass(frozen=True)
 class SourceSpanResult:
     file_path: Path
+    start_line: int
+    start_character: int
+    end_line: int
+    end_character: int
     text: str

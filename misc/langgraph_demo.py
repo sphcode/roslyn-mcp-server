@@ -63,12 +63,33 @@ def _unwrap_backend_response(response):
     raise BackendClientError(json.dumps(response, ensure_ascii=False))
 
 
+def _tool_error_payload(tool_name, error_type, message):
+    payload = {
+        "ok": False,
+        "error": {
+            "type": error_type,
+            "message": message,
+        },
+    }
+    print(
+        f"[tool] {tool_name} error={json.dumps(payload, ensure_ascii=False)}",
+        file=sys.stderr,
+    )
+    return payload
+
+
 def _call_backend_tool(tool_name, operation, *, retry_on_empty=False):
     import time
 
     last_payload = None
     for attempt in range(1, 4):
-        payload = _unwrap_backend_response(operation())
+        try:
+            payload = _unwrap_backend_response(operation())
+        except BackendClientError as exc:
+            return _tool_error_payload(tool_name, "backend_error", str(exc))
+        except Exception as exc:
+            return _tool_error_payload(tool_name, "tool_execution_error", str(exc))
+
         last_payload = payload
         count = payload.get("count")
         print(
