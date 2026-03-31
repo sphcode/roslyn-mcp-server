@@ -34,6 +34,7 @@ class BackendServer:
         self.session = RoslynSession(
             server_path=config["server_path"],
             solution_or_project_path=config["solution_or_project_path"],
+            timeouts=config["roslyn_timeouts"],
         )
         self.workspace_service = WorkspaceService(self.session)
         self.navigation_service = NavigationService(self.session)

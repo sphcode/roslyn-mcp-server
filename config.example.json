@@ -3,6 +3,12 @@
   "solution_or_project_path": "/absolute/or/relative/path/to/your.sln",
   "listen_host": "127.0.0.1",
   "listen_port": 8765,
+  "roslyn_timeouts": {
+    "request_seconds": 30,
+    "search_symbols_seconds": 120,
+    "initialize_seconds": 30,
+    "workspace_ready_seconds": 60
+  },
   "langgraph_demo": {
     "model": "gpt-4.1-mini",
     "api_key": "your-openai-compatible-api-key",

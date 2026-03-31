@@ -35,6 +35,14 @@ MCP tools:
 Coordinate system:
 - All `line` and `character` fields are `0-based`, matching LSP.
 
+Timeouts:
+- `search_symbols` uses a longer Roslyn timeout by default because `workspace/symbol` can be much slower on real solutions.
+- Optional config:
+  - `roslyn_timeouts.request_seconds`
+  - `roslyn_timeouts.search_symbols_seconds`
+  - `roslyn_timeouts.initialize_seconds`
+  - `roslyn_timeouts.workspace_ready_seconds`
+
 Testing:
 - `pytest` now runs real integration tests against:
   - a real backend daemon process

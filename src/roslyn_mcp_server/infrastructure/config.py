@@ -22,6 +22,20 @@ def load_server_config(config_path):
     )
     config["listen_host"] = config.get("listen_host", "127.0.0.1")
     config["listen_port"] = int(config.get("listen_port", 8765))
+    roslyn_timeouts = dict(config.get("roslyn_timeouts", {}))
+    roslyn_timeouts["request_seconds"] = int(
+        roslyn_timeouts.get("request_seconds", 30)
+    )
+    roslyn_timeouts["search_symbols_seconds"] = int(
+        roslyn_timeouts.get("search_symbols_seconds", 120)
+    )
+    roslyn_timeouts["initialize_seconds"] = int(
+        roslyn_timeouts.get("initialize_seconds", 30)
+    )
+    roslyn_timeouts["workspace_ready_seconds"] = int(
+        roslyn_timeouts.get("workspace_ready_seconds", 60)
+    )
+    config["roslyn_timeouts"] = roslyn_timeouts
     langgraph_demo = dict(config.get("langgraph_demo", {}))
     langgraph_demo["model"] = langgraph_demo.get("model", "gpt-4.1-mini")
     langgraph_demo["api_key"] = langgraph_demo.get("api_key")
