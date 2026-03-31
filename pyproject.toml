@@ -17,7 +17,6 @@ demo = ["langchain>=1,<2", "langgraph>=1,<2", "langchain-openai>=1,<2"]
 [project.scripts]
 roslyn-mcp-server = "roslyn_mcp_server.main:main"
 roslyn-mcp-backend = "roslyn_mcp_server.backend.server:main"
-roslyn-mcp-client = "roslyn_mcp_server.client_cli:main"
 roslyn-mcp-http-bridge = "roslyn_mcp_server.infrastructure.http_bridge:main"
 
 [tool.setuptools]

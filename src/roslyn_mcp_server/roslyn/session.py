@@ -42,7 +42,7 @@ def guess_csharp_design_time_path(server_path):
 
 
 class RoslynSession:
-    def __init__(self, server_path, solution_or_project_path):
+    def __init__(self, server_path, solution_or_project_path, timeouts=None):
         self.server_path = Path(server_path).resolve()
         self.solution_or_project_path = Path(solution_or_project_path).resolve()
         self.workspace_root = self.solution_or_project_path.parent
@@ -50,6 +50,17 @@ class RoslynSession:
         self.client = None
         self._documents = {}
         self._lock = threading.RLock()
+        configured_timeouts = dict(timeouts or {})
+        self.request_timeout_seconds = int(configured_timeouts.get("request_seconds", 30))
+        self.search_symbols_timeout_seconds = int(
+            configured_timeouts.get("search_symbols_seconds", 120)
+        )
+        self.initialize_timeout_seconds = int(
+            configured_timeouts.get("initialize_seconds", 30)
+        )
+        self.workspace_ready_timeout_seconds = int(
+            configured_timeouts.get("workspace_ready_seconds", 60)
+        )
 
     def start(self):
         log_dir = Path(".logs/roslyn-server").resolve()
@@ -73,7 +84,7 @@ class RoslynSession:
         try:
             notification = self.client.wait_for_notification(
                 "workspace/projectInitializationComplete",
-                timeout=60,
+                timeout=self.workspace_ready_timeout_seconds,
             )
             logger.info("Roslyn workspace/projectInitializationComplete: %s", notification)
             return True
@@ -94,7 +105,7 @@ class RoslynSession:
                     "textDocument": {"uri": path_to_uri(file_path)},
                     "position": {"line": line, "character": character},
                 },
-                timeout=30,
+                timeout=self.request_timeout_seconds,
             )
 
     def references(self, file_path, line, character, include_declaration=True):
@@ -108,7 +119,7 @@ class RoslynSession:
                     "position": {"line": line, "character": character},
                     "context": {"includeDeclaration": include_declaration},
                 },
-                timeout=30,
+                timeout=self.request_timeout_seconds,
             )
 
     def implementations(self, file_path, line, character):
@@ -121,7 +132,7 @@ class RoslynSession:
                     "textDocument": {"uri": path_to_uri(file_path)},
                     "position": {"line": line, "character": character},
                 },
-                timeout=30,
+                timeout=self.request_timeout_seconds,
             )
 
     def document_symbols(self, file_path):
@@ -133,7 +144,7 @@ class RoslynSession:
                 {
                     "textDocument": {"uri": path_to_uri(file_path)},
                 },
-                timeout=30,
+                timeout=self.request_timeout_seconds,
             )
 
     def search_symbols(self, query):
@@ -143,7 +154,7 @@ class RoslynSession:
                 {
                     "query": query,
                 },
-                timeout=30,
+                timeout=self.search_symbols_timeout_seconds,
             )
 
     def close(self):
@@ -239,7 +250,11 @@ class RoslynSession:
                 },
             },
         }
-        result = self.client.send_request("initialize", params, timeout=30)
+        result = self.client.send_request(
+            "initialize",
+            params,
+            timeout=self.initialize_timeout_seconds,
+        )
         self.client.send_notification("initialized", {})
         return result
 

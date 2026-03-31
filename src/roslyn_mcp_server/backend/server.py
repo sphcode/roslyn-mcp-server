@@ -34,6 +34,7 @@ class BackendServer:
         self.session = RoslynSession(
             server_path=config["server_path"],
             solution_or_project_path=config["solution_or_project_path"],
+            timeouts=config["roslyn_timeouts"],
         )
         self.workspace_service = WorkspaceService(self.session)
         self.navigation_service = NavigationService(self.session)
@@ -217,7 +218,9 @@ class BackendServer:
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Run the Roslyn backend daemon")
+    parser = argparse.ArgumentParser(
+        description="Run the internal Roslyn runtime used by the MCP server"
+    )
     parser.add_argument(
         "config",
         nargs="?",
@@ -234,7 +237,7 @@ def main(argv=None):
         server = BackendServer(load_server_config(args.config))
         server.serve_forever()
     except Exception as exc:
-        logger.exception("Failed to run backend daemon: %s", exc)
+        logger.exception("Failed to run internal Roslyn runtime: %s", exc)
         return 1
     return 0
 

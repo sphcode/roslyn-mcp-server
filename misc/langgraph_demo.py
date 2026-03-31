@@ -1,17 +1,14 @@
+import argparse
+import json
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import argparse
-import json
-
-from roslyn_mcp_server.backend.client import BackendClient, BackendClientError
-from roslyn_mcp_server.infrastructure.config import load_server_config
-
+from mcp_process_client import McpProcessClient, McpProcessClientError
 SYSTEM_PROMPT = """You are a C# code navigation assistant backed by Roslyn.
 
 Use the available tools instead of guessing. Prefer this workflow:
@@ -30,15 +27,21 @@ Important constraints:
 - If you need the exact definition or implementation line for a member, prefer the member entry from `document_symbols`, `find_definition`, or `find_implementations` over any surrounding container span.
 """
 
-
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Run a minimal LangGraph-based agent demo against the Roslyn backend"
+        description="Run an interactive LangGraph demo against the Roslyn MCP server"
     )
-    parser.add_argument("--config", default="config.json", help="Server config file")
-    parser.add_argument("--host", help="Backend host override")
-    parser.add_argument("--port", type=int, help="Backend port override")
+    parser.add_argument("--config", default="config.json", help="Config file")
     return parser.parse_args(argv)
+
+
+def _load_config(config_path: Path):
+    with config_path.open("r", encoding="utf-8") as handle:
+        config = json.load(handle)
+
+    demo_config = dict(config.get("langgraph_demo") or {})
+    demo_config.setdefault("model", "gpt-4.1-mini")
+    return demo_config
 
 
 def _require_langgraph_stack():
@@ -55,22 +58,33 @@ def _require_langgraph_stack():
     return create_agent, tool, ChatOpenAI
 
 
-def _unwrap_backend_response(response):
-    if response.get("ok", False):
-        payload = dict(response)
-        payload.pop("ok", None)
-        return payload
-    raise BackendClientError(json.dumps(response, ensure_ascii=False))
+def _tool_error_payload(tool_name, error_type, message):
+    payload = {
+        "ok": False,
+        "error": {
+            "type": error_type,
+            "message": message,
+        },
+    }
+    print(
+        f"[tool] {tool_name} error={json.dumps(payload, ensure_ascii=False)}",
+        file=sys.stderr,
+    )
+    return payload
 
 
-def _call_backend_tool(tool_name, operation, *, retry_on_empty=False):
-    import time
-
+def _call_mcp_tool(client, tool_name, arguments=None, *, retry_on_empty=False):
     last_payload = None
     for attempt in range(1, 4):
-        payload = _unwrap_backend_response(operation())
+        try:
+            payload = client.call_tool(tool_name, arguments or {})
+        except McpProcessClientError as exc:
+            return _tool_error_payload(tool_name, "mcp_error", str(exc))
+        except Exception as exc:
+            return _tool_error_payload(tool_name, "tool_execution_error", str(exc))
+
         last_payload = payload
-        count = payload.get("count")
+        count = payload.get("count") if isinstance(payload, dict) else None
         print(
             f"[tool] {tool_name} attempt={attempt} payload={json.dumps(payload, ensure_ascii=False)}",
             file=sys.stderr,
@@ -87,9 +101,9 @@ def build_tools(client):
 
     @tool
     def health() -> str:
-        """Return backend workspace health and Roslyn initialization status."""
+        """Return workspace health and Roslyn initialization status."""
         return json.dumps(
-            _call_backend_tool("health", client.health),
+            _call_mcp_tool(client, "health"),
             ensure_ascii=False,
             indent=2,
         )
@@ -98,9 +112,10 @@ def build_tools(client):
     def search_symbols(query: str) -> str:
         """Search workspace symbols by name. Use broad symbol text if an exact interface name returns nothing."""
         return json.dumps(
-            _call_backend_tool(
+            _call_mcp_tool(
+                client,
                 "search_symbols",
-                lambda: client.search_symbols(query=query),
+                {"query": query},
                 retry_on_empty=True,
             ),
             ensure_ascii=False,
@@ -111,10 +126,7 @@ def build_tools(client):
     def document_symbols(file_path: str) -> str:
         """List symbols declared in a single C# file. Use each symbol's location.range.start.line as the exact line for that symbol."""
         return json.dumps(
-            _call_backend_tool(
-                "document_symbols",
-                lambda: client.document_symbols(file_path=file_path),
-            ),
+            _call_mcp_tool(client, "document_symbols", {"file_path": file_path}),
             ensure_ascii=False,
             indent=2,
         )
@@ -123,13 +135,14 @@ def build_tools(client):
     def find_definition(file_path: str, line: int, character: int) -> str:
         """Find the exact definition location for the symbol at a 0-based LSP position. Use the returned location.range.start.line directly in your answer."""
         return json.dumps(
-            _call_backend_tool(
+            _call_mcp_tool(
+                client,
                 "find_definition",
-                lambda: client.find_definition(
-                    file_path=file_path,
-                    line=line,
-                    character=character,
-                ),
+                {
+                    "file_path": file_path,
+                    "line": line,
+                    "character": character,
+                },
             ),
             ensure_ascii=False,
             indent=2,
@@ -144,14 +157,15 @@ def build_tools(client):
     ) -> str:
         """Find references for the symbol at a 0-based LSP position."""
         return json.dumps(
-            _call_backend_tool(
+            _call_mcp_tool(
+                client,
                 "find_references",
-                lambda: client.find_references(
-                    file_path=file_path,
-                    line=line,
-                    character=character,
-                    include_declaration=include_declaration,
-                ),
+                {
+                    "file_path": file_path,
+                    "line": line,
+                    "character": character,
+                    "include_declaration": include_declaration,
+                },
             ),
             ensure_ascii=False,
             indent=2,
@@ -161,13 +175,14 @@ def build_tools(client):
     def find_implementations(file_path: str, line: int, character: int) -> str:
         """Find the exact implementation locations for the symbol at a 0-based LSP position. Use the returned location.range.start.line directly in your answer."""
         return json.dumps(
-            _call_backend_tool(
+            _call_mcp_tool(
+                client,
                 "find_implementations",
-                lambda: client.find_implementations(
-                    file_path=file_path,
-                    line=line,
-                    character=character,
-                ),
+                {
+                    "file_path": file_path,
+                    "line": line,
+                    "character": character,
+                },
             ),
             ensure_ascii=False,
             indent=2,
@@ -183,15 +198,16 @@ def build_tools(client):
     ) -> str:
         """Read a source code span from disk using 0-based start/end positions. This is for code context only, not for determining the exact symbol line when another tool already returned a symbol range."""
         return json.dumps(
-            _call_backend_tool(
+            _call_mcp_tool(
+                client,
                 "read_span",
-                lambda: client.read_span(
-                    file_path=file_path,
-                    start_line=start_line,
-                    start_character=start_character,
-                    end_line=end_line,
-                    end_character=end_character,
-                ),
+                {
+                    "file_path": file_path,
+                    "start_line": start_line,
+                    "start_character": start_character,
+                    "end_line": end_line,
+                    "end_character": end_character,
+                },
             ),
             ensure_ascii=False,
             indent=2,
@@ -220,8 +236,7 @@ def _read_prompt():
     return prompt
 
 
-def _print_messages(result):
-    messages = result.get("messages", [])
+def _print_messages(messages):
     for message in messages:
         if hasattr(message, "pretty_print"):
             message.pretty_print()
@@ -242,28 +257,43 @@ def _print_messages(result):
         print()
 
 
+def _run_repl(agent):
+    state = {"messages": []}
+
+    while True:
+        try:
+            prompt = _read_prompt()
+        except EOFError:
+            print("\nExiting.", file=sys.stderr)
+            return 0
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            continue
+
+        if prompt in {"exit", "quit", "/exit", "/quit"}:
+            return 0
+
+        if prompt == "/reset":
+            state = {"messages": []}
+            print("[system]\nConversation state reset.\n")
+            continue
+
+        previous_count = len(state["messages"])
+        state["messages"].append({"role": "user", "content": prompt})
+
+        try:
+            state = agent.invoke(state)
+        except Exception as exc:
+            print(f"LangGraph demo failed: {exc}", file=sys.stderr)
+            continue
+
+        _print_messages(state.get("messages", [])[previous_count:])
+
+
 def main(argv=None):
     args = parse_args(argv)
-    config = load_server_config(args.config)
-    host = args.host or config["listen_host"]
-    port = args.port or config["listen_port"]
-    demo_config = config["langgraph_demo"]
-
-    client = BackendClient(host=host, port=port)
-    try:
-        health_result = _unwrap_backend_response(client.health())
-    except BackendClientError as exc:
-        print(f"Backend health check failed: {exc}", file=sys.stderr)
-        return 1
-
-    if health_result["status"] not in {"ready", "degraded"}:
-        print(
-            "Backend is not ready for navigation. "
-            f"Current status: {health_result['status']}. "
-            "Start the backend daemon first and wait for Roslyn to finish loading.",
-            file=sys.stderr,
-        )
-        return 1
+    config_path = Path(args.config).resolve()
+    demo_config = _load_config(config_path)
 
     try:
         create_agent, _tool, ChatOpenAI = _require_langgraph_stack()
@@ -275,41 +305,56 @@ def main(argv=None):
         print("langgraph_demo.api_key is not set in config.json.", file=sys.stderr)
         return 1
 
+    client = McpProcessClient(config_path)
     try:
-        prompt = _read_prompt()
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+        client.start()
+        available_tools = {tool["name"] for tool in client.list_tools()}
+        missing_tools = {
+            "health",
+            "search_symbols",
+            "document_symbols",
+            "find_definition",
+            "find_references",
+            "find_implementations",
+            "read_span",
+        } - available_tools
+        if missing_tools:
+            print(
+                f"MCP server is missing required tools: {sorted(missing_tools)}",
+                file=sys.stderr,
+            )
+            return 1
 
-    model = ChatOpenAI(
-        model=demo_config["model"],
-        temperature=0,
-        api_key=demo_config["api_key"],
-        base_url=demo_config.get("base_url"),
-    )
-    agent = create_agent(
-        model=model,
-        tools=build_tools(client),
-        system_prompt=SYSTEM_PROMPT,
-    )
+        health_result = _call_mcp_tool(client, "health")
+        if not health_result.get("ok", True):
+            print(
+                f"MCP health check failed: {json.dumps(health_result, ensure_ascii=False)}",
+                file=sys.stderr,
+            )
+            return 1
+        if health_result["status"] not in {"ready", "degraded"}:
+            print(
+                "MCP server is not ready for navigation. "
+                f"Current status: {health_result['status']}",
+                file=sys.stderr,
+            )
+            return 1
 
-    try:
-        result = agent.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ]
-            }
+        model = ChatOpenAI(
+            model=demo_config["model"],
+            temperature=0,
+            api_key=demo_config["api_key"],
+            base_url=demo_config.get("base_url"),
         )
-    except Exception as exc:
-        print(f"LangGraph demo failed: {exc}", file=sys.stderr)
-        return 1
-
-    _print_messages(result)
-    return 0
+        agent = create_agent(
+            model=model,
+            tools=build_tools(client),
+            system_prompt=SYSTEM_PROMPT,
+        )
+        print("Interactive chat started. Use /reset to clear context, /exit to quit.")
+        return _run_repl(agent)
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":

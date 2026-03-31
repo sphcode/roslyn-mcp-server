@@ -10,7 +10,13 @@ def uri_to_path(uri):
     parsed = urlparse(uri)
     if parsed.scheme != "file":
         return None
-    return unquote(parsed.path)
+
+    path = unquote(parsed.path)
+    if parsed.netloc and parsed.netloc != "localhost":
+        path = f"//{parsed.netloc}{path}"
+    if len(path) >= 3 and path[0] == "/" and path[1].isalpha() and path[2] == ":":
+        return path[1:]
+    return path
 
 
 def _normalize_range(range_value):
