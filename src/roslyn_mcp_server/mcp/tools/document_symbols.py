@@ -8,7 +8,7 @@ def handle(workspace_service, navigation_service, payload):
     workspace_service.ensure_navigation_ready()
     request = TextDocumentRequest(file_path=Path(payload["file_path"]))
     result = navigation_service.document_symbols(request)
-    symbols = normalize_document_symbols(result.locations)
+    symbols = normalize_document_symbols(result.locations, request.file_path)
     return {
         "query": {
             "file_path": str(request.file_path),

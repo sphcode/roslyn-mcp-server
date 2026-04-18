@@ -65,17 +65,50 @@ In the current implementation, the MCP server automatically starts and manages t
 
 ## Tools
 
-The server currently exposes these MCP tools:
+### First Batch
+
+The first batch of tools should be:
 
 - `health`
-- `find_definition`
-- `find_references`
-- `find_implementations`
-- `document_symbols`
+  - return workspace and server readiness
 - `search_symbols`
-- `read_span`
+  - search the workspace for candidate symbols
+  - return `symbol_handle` values that can be passed to follow-up tools
+- `document_symbols`
+  - list symbols declared in a file
+  - return `symbol_handle` values for each symbol
+- `find_definition_by_symbol`
+  - jump to definitions from a `symbol_handle`
+- `find_references_by_symbol`
+  - find references from a `symbol_handle`
+- `find_implementations_by_symbol`
+  - find implementations from a `symbol_handle`
+- `read_symbol`
+  - read the source for a symbol directly
+- `read_file`
+  - read a file, optionally by line range
 
-All coordinates use LSP semantics:
+These tools are being implemented incrementally. The current server is in a transitional state where both:
+
+- newer symbol-oriented tools
+- older position-based tools
+
+may coexist for a period of time.
+
+### Transitional State
+
+The current implementation still contains lower-level position-based tools inherited from the underlying LSP model. Those are implementation-oriented and will be phased down in favor of the symbol-oriented MCP surface above.
+
+Examples of lower-level tools that should not remain the primary MCP interface:
+
+- `find_definition(file_path, line, character)`
+- `find_references(file_path, line, character)`
+- `find_implementations(file_path, line, character)`
+- `read_span(file_path, start_line, start_character, end_line, end_character)`
+
+### Coordinate System
+
+Where coordinates do appear in tool results, they follow LSP semantics:
 
 - `line` is `0-based`
 - `character` is `0-based`
