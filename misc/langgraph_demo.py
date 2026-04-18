@@ -20,7 +20,7 @@ Use the available tools instead of guessing. Prefer this workflow:
 
 Important constraints:
 - Prefer symbol-oriented tools over raw position-oriented reasoning.
-- Treat symbol_handle as an opaque handle returned by tools. Do not invent or modify it.
+- Treat symbol_handle as an opaque handle returned by tools. Copy it exactly. Do not invent, rewrite, or partially reconstruct it.
 - All line and character coordinates in tool results are 0-based.
 - Do not invent file paths, symbol positions, or code snippets.
 - If a tool returns no results, say that clearly and explain what you tried.

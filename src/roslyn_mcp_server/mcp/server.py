@@ -5,7 +5,10 @@ import traceback
 
 from roslyn_mcp_server.backend.client import BackendClient, BackendClientError
 from roslyn_mcp_server.infrastructure.logging import get_logger
-from roslyn_mcp_server.roslyn.translators import parse_symbol_handle
+from roslyn_mcp_server.roslyn.translators import (
+    InvalidSymbolHandleError,
+    parse_symbol_handle,
+)
 
 JSONRPC_VERSION = "2.0"
 logger = get_logger(__name__)
@@ -140,6 +143,12 @@ class RoslynMcpServer:
             logger.warning("Tool '%s' failed with backend error: %s", tool_name, exc)
             return self._tool_failure_result(
                 error_type="backend_error",
+                message=str(exc),
+            )
+        except InvalidSymbolHandleError as exc:
+            logger.warning("Tool '%s' failed with invalid symbol_handle: %s", tool_name, exc)
+            return self._tool_failure_result(
+                error_type="invalid_symbol_handle",
                 message=str(exc),
             )
         except Exception as exc:

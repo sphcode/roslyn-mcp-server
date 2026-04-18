@@ -1,7 +1,12 @@
 import base64
+import hashlib
 import json
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+
+class InvalidSymbolHandleError(ValueError):
+    pass
 
 
 def path_to_uri(path):
@@ -62,28 +67,37 @@ def create_symbol_handle(
     if selection_range is not None:
         payload["selection_range"] = selection_range
 
-    encoded = base64.urlsafe_b64encode(
+    encoded_payload = base64.urlsafe_b64encode(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    ).decode("ascii")
-    return f"sym:{encoded.rstrip('=')}"
+    ).decode("ascii").rstrip("=")
+    checksum = hashlib.sha256(encoded_payload.encode("ascii")).hexdigest()[:16]
+    return f"sym:{encoded_payload}.{checksum}"
 
 
 def parse_symbol_handle(symbol_handle):
     if not isinstance(symbol_handle, str) or not symbol_handle.startswith("sym:"):
-        raise ValueError("Invalid symbol_handle")
+        raise InvalidSymbolHandleError("Invalid symbol_handle")
 
     encoded = symbol_handle[4:]
-    padding = "=" * (-len(encoded) % 4)
+    if "." not in encoded:
+        raise InvalidSymbolHandleError("Invalid symbol_handle")
+
+    encoded_payload, checksum = encoded.rsplit(".", 1)
+    expected_checksum = hashlib.sha256(encoded_payload.encode("ascii")).hexdigest()[:16]
+    if checksum != expected_checksum:
+        raise InvalidSymbolHandleError("Invalid symbol_handle")
+
+    padding = "=" * (-len(encoded_payload) % 4)
     try:
         payload = json.loads(
-            base64.urlsafe_b64decode((encoded + padding).encode("ascii")).decode("utf-8")
+            base64.urlsafe_b64decode((encoded_payload + padding).encode("ascii")).decode("utf-8")
         )
     except Exception as exc:
-        raise ValueError("Invalid symbol_handle") from exc
+        raise InvalidSymbolHandleError("Invalid symbol_handle") from exc
 
     required_fields = {"file_path", "line", "character", "name", "kind"}
     if not required_fields.issubset(payload):
-        raise ValueError("Invalid symbol_handle")
+        raise InvalidSymbolHandleError("Invalid symbol_handle")
     return payload
 
 
