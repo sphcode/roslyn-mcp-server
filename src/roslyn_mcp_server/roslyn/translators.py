@@ -215,11 +215,15 @@ def normalize_document_symbols(raw_result, file_path):
             normalized.append(
                 {
                     "name": item.get("name"),
+                    "detail": item.get("detail"),
                     "kind": item.get("kind"),
                     "tags": item.get("tags", []),
+                    "deprecated": bool(item.get("deprecated", False)),
                     "container_name": item.get("containerName"),
                     "file_path": resolved_file_path,
                     "location": location,
+                    "range": location["range"],
+                    "selection_range": location["range"],
                     "symbol_handle": create_symbol_handle(
                         file_path=resolved_file_path,
                         line=anchor[0],
