@@ -68,11 +68,9 @@ This is the normal product entrypoint.
 
 In the current implementation, the MCP server automatically starts and manages the internal Roslyn runtime it needs.
 
-## Tools
+## Available Tools
 
-### First Batch
-
-The first batch of tools should be:
+The server currently exposes these MCP tools:
 
 - `health`
   - return workspace and server readiness
@@ -91,7 +89,8 @@ The first batch of tools should be:
 - `read_symbol`
   - read the source for a symbol directly
 - `read_file`
-  - read a file, optionally by line range
+  - fallback file reader for MCP hosts without local shell or filesystem tools
+  - coding agents with `rg`, `sed`, or native file view tools should prefer those for raw file context
 
 ### Coordinate System
 
@@ -122,6 +121,12 @@ Where coordinates do appear in tool results, they follow LSP semantics:
 ## LangGraph Demo
 
 The LangGraph demo is a host-side example. It is not part of the product surface.
+
+Install the demo dependencies before running it:
+
+```bash
+python3 -m pip install -e '.[demo]'
+```
 
 Run it with:
 

@@ -14,37 +14,31 @@ class BackendClient:
     def health(self):
         return self._request_json("GET", "/health")
 
-    def find_definition(self, file_path, line, character):
+    def find_definition_by_symbol(self, symbol_handle):
         return self._request_json(
             "POST",
-            "/definition",
+            "/definition-by-symbol",
             {
-                "file_path": file_path,
-                "line": line,
-                "character": character,
+                "symbol_handle": symbol_handle,
             },
         )
 
-    def find_references(self, file_path, line, character, include_declaration=True):
+    def find_references_by_symbol(self, symbol_handle, include_declaration=True):
         return self._request_json(
             "POST",
-            "/references",
+            "/references-by-symbol",
             {
-                "file_path": file_path,
-                "line": line,
-                "character": character,
+                "symbol_handle": symbol_handle,
                 "include_declaration": include_declaration,
             },
         )
 
-    def find_implementations(self, file_path, line, character):
+    def find_implementations_by_symbol(self, symbol_handle):
         return self._request_json(
             "POST",
-            "/implementations",
+            "/implementations-by-symbol",
             {
-                "file_path": file_path,
-                "line": line,
-                "character": character,
+                "symbol_handle": symbol_handle,
             },
         )
 
@@ -66,24 +60,28 @@ class BackendClient:
             },
         )
 
-    def read_span(
-        self,
-        file_path,
-        start_line,
-        start_character,
-        end_line,
-        end_character,
-    ):
+    def read_symbol(self, symbol_handle, include_body=True, context_lines=0):
         return self._request_json(
             "POST",
-            "/read-span",
+            "/read-symbol",
             {
-                "file_path": file_path,
-                "start_line": start_line,
-                "start_character": start_character,
-                "end_line": end_line,
-                "end_character": end_character,
+                "symbol_handle": symbol_handle,
+                "include_body": include_body,
+                "context_lines": context_lines,
             },
+        )
+
+    def read_file(self, file_path, start_line=0, end_line=None):
+        payload = {
+            "file_path": file_path,
+            "start_line": start_line,
+        }
+        if end_line is not None:
+            payload["end_line"] = end_line
+        return self._request_json(
+            "POST",
+            "/read-file",
+            payload,
         )
 
     def shutdown(self):
