@@ -14,17 +14,21 @@ SYSTEM_PROMPT = """You are a C# code navigation assistant backed by Roslyn.
 Use the available tools instead of guessing. Prefer this workflow:
 1. Use search_symbols to find likely entry points across the workspace.
 2. Use document_symbols to inspect a candidate file's structure.
-3. Use find_definition, find_implementations, and find_references for precise navigation.
-4. Use read_span to read source code around the relevant locations before answering.
+3. Use find_definition_by_symbol, find_implementations_by_symbol, and find_references_by_symbol for precise navigation.
+4. Use read_symbol to read symbol source directly before answering.
+5. Use read_file when the user already gave you a file path or when you need broader file context.
 
 Important constraints:
-- All line and character coordinates are 0-based.
+- Prefer symbol-oriented tools over raw position-oriented reasoning.
+- Treat symbol_handle as an opaque handle returned by tools. Copy it exactly. Do not invent, rewrite, or partially reconstruct it.
+- All line and character coordinates in tool results are 0-based.
 - Do not invent file paths, symbol positions, or code snippets.
 - If a tool returns no results, say that clearly and explain what you tried.
 - When a tool returns a symbol or location range, use `location.range.start.line` as the exact line number for that symbol.
-- `read_span` is only for reading code context. Do not use the start of a read span as the symbol's definition or implementation line.
+- `read_symbol` is the preferred way to read code for a known symbol.
+- `read_file` is the preferred way to read a file directly.
 - The line for an interface/type declaration is not the line for one of its members. If the user asks for a method, cite the method symbol's own range.
-- If you need the exact definition or implementation line for a member, prefer the member entry from `document_symbols`, `find_definition`, or `find_implementations` over any surrounding container span.
+- If you need the exact definition or implementation line for a member, prefer the member entry from `document_symbols`, `find_definition_by_symbol`, or `find_implementations_by_symbol` over any surrounding container span.
 """
 
 def parse_args(argv=None):
@@ -124,7 +128,7 @@ def build_tools(client):
 
     @tool
     def document_symbols(file_path: str) -> str:
-        """List symbols declared in a single C# file. Use each symbol's location.range.start.line as the exact line for that symbol."""
+        """List symbols declared in a single C# file. Each symbol includes a symbol_handle that should be reused for follow-up navigation."""
         return json.dumps(
             _call_mcp_tool(client, "document_symbols", {"file_path": file_path}),
             ensure_ascii=False,
@@ -132,38 +136,30 @@ def build_tools(client):
         )
 
     @tool
-    def find_definition(file_path: str, line: int, character: int) -> str:
-        """Find the exact definition location for the symbol at a 0-based LSP position. Use the returned location.range.start.line directly in your answer."""
+    def find_definition_by_symbol(symbol_handle: str) -> str:
+        """Find definition locations for a previously discovered symbol_handle."""
         return json.dumps(
             _call_mcp_tool(
                 client,
-                "find_definition",
-                {
-                    "file_path": file_path,
-                    "line": line,
-                    "character": character,
-                },
+                "find_definition_by_symbol",
+                {"symbol_handle": symbol_handle},
             ),
             ensure_ascii=False,
             indent=2,
         )
 
     @tool
-    def find_references(
-        file_path: str,
-        line: int,
-        character: int,
+    def find_references_by_symbol(
+        symbol_handle: str,
         include_declaration: bool = True,
     ) -> str:
-        """Find references for the symbol at a 0-based LSP position."""
+        """Find references for a previously discovered symbol_handle."""
         return json.dumps(
             _call_mcp_tool(
                 client,
-                "find_references",
+                "find_references_by_symbol",
                 {
-                    "file_path": file_path,
-                    "line": line,
-                    "character": character,
+                    "symbol_handle": symbol_handle,
                     "include_declaration": include_declaration,
                 },
             ),
@@ -172,16 +168,33 @@ def build_tools(client):
         )
 
     @tool
-    def find_implementations(file_path: str, line: int, character: int) -> str:
-        """Find the exact implementation locations for the symbol at a 0-based LSP position. Use the returned location.range.start.line directly in your answer."""
+    def find_implementations_by_symbol(symbol_handle: str) -> str:
+        """Find implementation locations for a previously discovered symbol_handle."""
         return json.dumps(
             _call_mcp_tool(
                 client,
-                "find_implementations",
+                "find_implementations_by_symbol",
+                {"symbol_handle": symbol_handle},
+            ),
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    @tool
+    def read_symbol(
+        symbol_handle: str,
+        include_body: bool = True,
+        context_lines: int = 0,
+    ) -> str:
+        """Read the source for a previously discovered symbol_handle."""
+        return json.dumps(
+            _call_mcp_tool(
+                client,
+                "read_symbol",
                 {
-                    "file_path": file_path,
-                    "line": line,
-                    "character": character,
+                    "symbol_handle": symbol_handle,
+                    "include_body": include_body,
+                    "context_lines": context_lines,
                 },
             ),
             ensure_ascii=False,
@@ -189,25 +202,23 @@ def build_tools(client):
         )
 
     @tool
-    def read_span(
+    def read_file(
         file_path: str,
-        start_line: int,
-        start_character: int,
-        end_line: int,
-        end_character: int,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> str:
-        """Read a source code span from disk using 0-based start/end positions. This is for code context only, not for determining the exact symbol line when another tool already returned a symbol range."""
+        """Read a file directly, optionally restricted to a line range."""
+        arguments = {"file_path": file_path}
+        if start_line is not None:
+            arguments["start_line"] = start_line
+        if end_line is not None:
+            arguments["end_line"] = end_line
+
         return json.dumps(
             _call_mcp_tool(
                 client,
-                "read_span",
-                {
-                    "file_path": file_path,
-                    "start_line": start_line,
-                    "start_character": start_character,
-                    "end_line": end_line,
-                    "end_character": end_character,
-                },
+                "read_file",
+                arguments,
             ),
             ensure_ascii=False,
             indent=2,
@@ -217,10 +228,11 @@ def build_tools(client):
         health,
         search_symbols,
         document_symbols,
-        find_definition,
-        find_references,
-        find_implementations,
-        read_span,
+        find_definition_by_symbol,
+        find_references_by_symbol,
+        find_implementations_by_symbol,
+        read_symbol,
+        read_file,
     ]
 
 
@@ -313,10 +325,11 @@ def main(argv=None):
             "health",
             "search_symbols",
             "document_symbols",
-            "find_definition",
-            "find_references",
-            "find_implementations",
-            "read_span",
+            "find_definition_by_symbol",
+            "find_references_by_symbol",
+            "find_implementations_by_symbol",
+            "read_symbol",
+            "read_file",
         } - available_tools
         if missing_tools:
             print(

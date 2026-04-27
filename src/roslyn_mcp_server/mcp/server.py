@@ -5,9 +5,15 @@ import traceback
 
 from roslyn_mcp_server.backend.client import BackendClient, BackendClientError
 from roslyn_mcp_server.infrastructure.logging import get_logger
+from roslyn_mcp_server.roslyn.translators import (
+    InvalidSymbolHandleError,
+    parse_symbol_handle,
+)
 
 JSONRPC_VERSION = "2.0"
 logger = get_logger(__name__)
+MAX_READ_LINE = 1_000_000_000
+MAX_READ_CHARACTER = 1_000_000_000
 
 
 class RoslynMcpServer:
@@ -22,12 +28,13 @@ class RoslynMcpServer:
         self._protocol_version = None
         self._tool_handlers = {
             "health": self._call_health,
-            "find_definition": self._call_find_definition,
-            "find_references": self._call_find_references,
-            "find_implementations": self._call_find_implementations,
+            "find_definition_by_symbol": self._call_find_definition_by_symbol,
+            "find_references_by_symbol": self._call_find_references_by_symbol,
+            "find_implementations_by_symbol": self._call_find_implementations_by_symbol,
             "document_symbols": self._call_document_symbols,
             "search_symbols": self._call_search_symbols,
-            "read_span": self._call_read_span,
+            "read_symbol": self._call_read_symbol,
+            "read_file": self._call_read_file,
         }
 
     def serve_forever(self):
@@ -134,6 +141,12 @@ class RoslynMcpServer:
                 error_type="backend_error",
                 message=str(exc),
             )
+        except InvalidSymbolHandleError as exc:
+            logger.warning("Tool '%s' failed with invalid symbol_handle: %s", tool_name, exc)
+            return self._tool_failure_result(
+                error_type="invalid_symbol_handle",
+                message=str(exc),
+            )
         except Exception as exc:
             logger.exception("Tool '%s' failed with unexpected error: %s", tool_name, exc)
             return self._tool_failure_result(
@@ -145,30 +158,42 @@ class RoslynMcpServer:
         response = self.backend_client.health()
         return self._unwrap_backend_response(response)
 
-    def _call_find_definition(self, arguments):
+    def _call_find_definition_by_symbol(self, arguments):
+        symbol = self._parse_symbol(arguments["symbol_handle"])
         response = self.backend_client.find_definition(
-            file_path=arguments["file_path"],
-            line=int(arguments["line"]),
-            character=int(arguments["character"]),
+            file_path=symbol["file_path"],
+            line=int(symbol["line"]),
+            character=int(symbol["character"]),
         )
-        return self._unwrap_backend_response(response)
+        payload = self._unwrap_backend_response(response)
+        payload["query"] = {"symbol_handle": arguments["symbol_handle"]}
+        return payload
 
-    def _call_find_references(self, arguments):
+    def _call_find_references_by_symbol(self, arguments):
+        symbol = self._parse_symbol(arguments["symbol_handle"])
         response = self.backend_client.find_references(
-            file_path=arguments["file_path"],
-            line=int(arguments["line"]),
-            character=int(arguments["character"]),
+            file_path=symbol["file_path"],
+            line=int(symbol["line"]),
+            character=int(symbol["character"]),
             include_declaration=bool(arguments.get("include_declaration", True)),
         )
-        return self._unwrap_backend_response(response)
+        payload = self._unwrap_backend_response(response)
+        payload["query"] = {
+            "symbol_handle": arguments["symbol_handle"],
+            "include_declaration": bool(arguments.get("include_declaration", True)),
+        }
+        return payload
 
-    def _call_find_implementations(self, arguments):
+    def _call_find_implementations_by_symbol(self, arguments):
+        symbol = self._parse_symbol(arguments["symbol_handle"])
         response = self.backend_client.find_implementations(
-            file_path=arguments["file_path"],
-            line=int(arguments["line"]),
-            character=int(arguments["character"]),
+            file_path=symbol["file_path"],
+            line=int(symbol["line"]),
+            character=int(symbol["character"]),
         )
-        return self._unwrap_backend_response(response)
+        payload = self._unwrap_backend_response(response)
+        payload["query"] = {"symbol_handle": arguments["symbol_handle"]}
+        return payload
 
     def _call_document_symbols(self, arguments):
         response = self.backend_client.document_symbols(
@@ -182,15 +207,109 @@ class RoslynMcpServer:
         )
         return self._unwrap_backend_response(response)
 
-    def _call_read_span(self, arguments):
+    def _call_read_symbol(self, arguments):
+        symbol = self._parse_symbol(arguments["symbol_handle"])
+        include_body = bool(arguments.get("include_body", True))
+        context_lines = max(0, int(arguments.get("context_lines", 0)))
+
+        document_symbols_response = self.backend_client.document_symbols(
+            file_path=symbol["file_path"],
+        )
+        document_symbols_payload = self._unwrap_backend_response(document_symbols_response)
+        matched_symbol = self._find_document_symbol(document_symbols_payload["symbols"], symbol)
+        fallback_range = self._default_read_range(symbol)
+
+        if matched_symbol is None:
+            read_range = fallback_range
+            resolved_symbol = {
+                "symbol_handle": arguments["symbol_handle"],
+                "name": symbol.get("name"),
+                "kind": symbol.get("kind"),
+                "container_name": symbol.get("container_name"),
+                "file_path": symbol.get("file_path"),
+                "range": symbol.get("range"),
+                "selection_range": symbol.get("selection_range"),
+                "matched_from_document_symbols": False,
+            }
+        else:
+            resolved_symbol = {
+                "symbol_handle": matched_symbol.get("symbol_handle"),
+                "name": matched_symbol.get("name"),
+                "kind": matched_symbol.get("kind"),
+                "container_name": matched_symbol.get("container_name"),
+                "file_path": matched_symbol.get("file_path"),
+                "range": matched_symbol.get("range"),
+                "selection_range": matched_symbol.get("selection_range"),
+                "matched_from_document_symbols": True,
+            }
+            read_range = (
+                matched_symbol.get("range")
+                or matched_symbol.get("selection_range")
+                or fallback_range
+            )
+
+        span_response = self.backend_client.read_span(
+            file_path=symbol["file_path"],
+            start_line=max(0, int(read_range["start"]["line"]) - context_lines),
+            start_character=0 if context_lines > 0 else int(read_range["start"]["character"]),
+            end_line=int(read_range["end"]["line"]) + context_lines,
+            end_character=MAX_READ_CHARACTER if context_lines > 0 else int(read_range["end"]["character"]),
+        )
+        span_payload = self._unwrap_backend_response(span_response)
+        text = span_payload["text"]
+        output_range = span_payload["range"]
+        if not include_body and matched_symbol is not None:
+            text, output_range = self._extract_declaration_text(
+                text=text,
+                base_range=span_payload["range"],
+            )
+        return {
+            "query": {
+                "symbol_handle": arguments["symbol_handle"],
+                "include_body": include_body,
+                "context_lines": context_lines,
+            },
+            "resolved_symbol": resolved_symbol,
+            "file_path": span_payload["file_path"],
+            "range": output_range,
+            "text": text,
+        }
+
+    def _default_read_range(self, symbol):
+        read_range = symbol.get("range") or symbol.get("selection_range")
+        if read_range is not None:
+            return read_range
+        return {
+            "start": {
+                "line": int(symbol["line"]),
+                "character": int(symbol["character"]),
+            },
+            "end": {
+                "line": int(symbol["line"]),
+                "character": int(symbol["character"]),
+            },
+        }
+
+    def _call_read_file(self, arguments):
+        start_line = max(0, int(arguments.get("start_line", 0)))
+        end_line = int(arguments.get("end_line", MAX_READ_LINE))
+        if end_line < start_line:
+            end_line = start_line
+
         response = self.backend_client.read_span(
             file_path=arguments["file_path"],
-            start_line=int(arguments["start_line"]),
-            start_character=int(arguments["start_character"]),
-            end_line=int(arguments["end_line"]),
-            end_character=int(arguments["end_character"]),
+            start_line=start_line,
+            start_character=0,
+            end_line=end_line,
+            end_character=MAX_READ_CHARACTER,
         )
-        return self._unwrap_backend_response(response)
+        payload = self._unwrap_backend_response(response)
+        payload["query"] = {
+            "file_path": arguments["file_path"],
+            "start_line": start_line,
+            "end_line": end_line if "end_line" in arguments else None,
+        }
+        return payload
 
     def _tool_failure_result(self, error_type, message, details=None):
         payload = {
@@ -220,6 +339,105 @@ class RoslynMcpServer:
             return payload
         raise BackendClientError(json.dumps(response, ensure_ascii=False))
 
+    def _parse_symbol(self, symbol_handle):
+        return parse_symbol_handle(symbol_handle)
+
+    def _find_document_symbol(self, symbols, symbol):
+        best_match = None
+        best_score = -1
+        for item in self._iter_document_symbols(symbols):
+            score = self._document_symbol_match_score(item, symbol)
+            if score > best_score:
+                best_match = item
+                best_score = score
+        return best_match if best_score >= 0 else None
+
+    def _iter_document_symbols(self, symbols):
+        for item in symbols:
+            yield item
+            yield from self._iter_document_symbols(item.get("children", []))
+
+    def _document_symbol_match_score(self, item, symbol):
+        if item.get("file_path") != symbol.get("file_path"):
+            return -1
+        if item.get("kind") != symbol.get("kind"):
+            return -1
+
+        item_name = item.get("name")
+        symbol_name = symbol.get("name")
+        if item_name is None or symbol_name is None:
+            return -1
+
+        item_short_name = self._short_symbol_name(item_name)
+        symbol_short_name = self._short_symbol_name(symbol_name)
+        if item_short_name != symbol_short_name:
+            return -1
+
+        score = 10
+        effective_range = item.get("selection_range") or item.get("range")
+        if effective_range is None:
+            return score
+        start = effective_range["start"]
+        if start["line"] == int(symbol["line"]) and start["character"] == int(symbol["character"]):
+            score += 100
+
+        item_range = item.get("range")
+        symbol_range = symbol.get("range")
+        if item_range is not None and symbol_range is not None and item_range == symbol_range:
+            score += 50
+
+        if item.get("container_name") == symbol.get("container_name"):
+            score += 5
+
+        return score
+
+    def _short_symbol_name(self, name):
+        short_name = name.rsplit(".", 1)[-1]
+        if "(" in short_name:
+            short_name = short_name.split("(", 1)[0]
+        return short_name
+
+    def _extract_declaration_text(self, text, base_range):
+        declaration_text = text
+        delimiter_index = None
+        for delimiter in ("{", ";"):
+            index = declaration_text.find(delimiter)
+            if index != -1 and (delimiter_index is None or index < delimiter_index):
+                delimiter_index = index
+
+        if delimiter_index is not None:
+            include_delimiter = declaration_text[delimiter_index] == ";"
+            end_index = delimiter_index + (1 if include_delimiter else 0)
+            declaration_text = declaration_text[:end_index].rstrip()
+        else:
+            declaration_text = declaration_text.rstrip()
+
+        return declaration_text, self._range_for_text(base_range, declaration_text)
+
+    def _range_for_text(self, base_range, text):
+        start = base_range["start"]
+        lines = text.splitlines()
+        if not lines:
+            end_line = start["line"]
+            end_character = start["character"]
+        elif len(lines) == 1:
+            end_line = start["line"]
+            end_character = start["character"] + len(lines[0])
+        else:
+            end_line = start["line"] + len(lines) - 1
+            end_character = len(lines[-1])
+
+        return {
+            "start": {
+                "line": start["line"],
+                "character": start["character"],
+            },
+            "end": {
+                "line": end_line,
+                "character": end_character,
+            },
+        }
+
     def _tool_definitions(self):
         return [
             {
@@ -232,45 +450,39 @@ class RoslynMcpServer:
                 },
             },
             {
-                "name": "find_definition",
-                "description": "Find the definition location for a C# symbol at a 0-based LSP position.",
+                "name": "find_definition_by_symbol",
+                "description": "Find definition locations for a previously discovered symbol_handle.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "file_path": {"type": "string"},
-                        "line": {"type": "integer", "minimum": 0},
-                        "character": {"type": "integer", "minimum": 0},
+                        "symbol_handle": {"type": "string"},
                     },
-                    "required": ["file_path", "line", "character"],
+                    "required": ["symbol_handle"],
                     "additionalProperties": False,
                 },
             },
             {
-                "name": "find_references",
-                "description": "Find references for a C# symbol at a 0-based LSP position.",
+                "name": "find_references_by_symbol",
+                "description": "Find references for a previously discovered symbol_handle.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "file_path": {"type": "string"},
-                        "line": {"type": "integer", "minimum": 0},
-                        "character": {"type": "integer", "minimum": 0},
+                        "symbol_handle": {"type": "string"},
                         "include_declaration": {"type": "boolean"},
                     },
-                    "required": ["file_path", "line", "character"],
+                    "required": ["symbol_handle"],
                     "additionalProperties": False,
                 },
             },
             {
-                "name": "find_implementations",
-                "description": "Find implementation locations for a C# symbol at a 0-based LSP position.",
+                "name": "find_implementations_by_symbol",
+                "description": "Find implementation locations for a previously discovered symbol_handle.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "file_path": {"type": "string"},
-                        "line": {"type": "integer", "minimum": 0},
-                        "character": {"type": "integer", "minimum": 0},
+                        "symbol_handle": {"type": "string"},
                     },
-                    "required": ["file_path", "line", "character"],
+                    "required": ["symbol_handle"],
                     "additionalProperties": False,
                 },
             },
@@ -299,24 +511,30 @@ class RoslynMcpServer:
                 },
             },
             {
-                "name": "read_span",
-                "description": "Read a source span from disk using 0-based start and end positions.",
+                "name": "read_symbol",
+                "description": "Read the source for a symbol_handle directly, optionally including its body and surrounding context.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "symbol_handle": {"type": "string"},
+                        "include_body": {"type": "boolean"},
+                        "context_lines": {"type": "integer", "minimum": 0},
+                    },
+                    "required": ["symbol_handle"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "read_file",
+                "description": "Read a file directly, optionally restricted to a line range.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "file_path": {"type": "string"},
                         "start_line": {"type": "integer", "minimum": 0},
-                        "start_character": {"type": "integer", "minimum": 0},
                         "end_line": {"type": "integer", "minimum": 0},
-                        "end_character": {"type": "integer", "minimum": 0},
                     },
-                    "required": [
-                        "file_path",
-                        "start_line",
-                        "start_character",
-                        "end_line",
-                        "end_character",
-                    ],
+                    "required": ["file_path"],
                     "additionalProperties": False,
                 },
             },

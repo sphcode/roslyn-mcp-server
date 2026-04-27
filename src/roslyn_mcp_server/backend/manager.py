@@ -23,8 +23,18 @@ class ManagedBackendRuntime:
         existing_status = self._health_status()
         if existing_status is not None:
             self._validate_workspace(existing_status)
-            logger.info("Reusing existing internal Roslyn runtime at %s", self.client.base_url)
-            return
+            status_name = existing_status.get("status")
+            if status_name in {"starting", "ready", "degraded"}:
+                logger.info(
+                    "Reusing existing internal Roslyn runtime at %s",
+                    self.client.base_url,
+                )
+                return
+            logger.warning(
+                "Existing internal Roslyn runtime is in '%s' state; restarting it",
+                status_name,
+            )
+            self._shutdown_existing_runtime()
 
         self._start_subprocess()
         self._wait_for_health()
@@ -83,6 +93,11 @@ class ManagedBackendRuntime:
             status = self._health_status()
             if status is not None:
                 self._validate_workspace(status)
+                if status.get("status") == "failed":
+                    raise RuntimeError(
+                        "Internal Roslyn runtime failed to initialize: "
+                        f"{status.get('last_error')}"
+                    )
                 return
             time.sleep(0.5)
 
@@ -96,6 +111,22 @@ class ManagedBackendRuntime:
         if not response.get("ok", False):
             return None
         return response
+
+    def _shutdown_existing_runtime(self):
+        try:
+            self.client.shutdown()
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to shut down existing internal Roslyn runtime"
+            ) from exc
+
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if self._health_status() is None:
+                return
+            time.sleep(0.5)
+
+        raise RuntimeError("Existing internal Roslyn runtime did not stop in time")
 
     def _validate_workspace(self, status):
         expected_workspace = str(self.config["solution_or_project_path"])
