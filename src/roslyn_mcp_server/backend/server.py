@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 import threading
 import traceback
@@ -46,10 +47,13 @@ class BackendServer:
             (self.config["listen_host"], self.config["listen_port"]),
             self._build_handler(),
         )
+        actual_host, actual_port = self.httpd.server_address[:2]
+        self.config["listen_port"] = int(actual_port)
+        self._write_port_file(actual_port)
         logger.info(
             "Backend listening on http://%s:%s",
-            self.config["listen_host"],
-            self.config["listen_port"],
+            actual_host,
+            actual_port,
         )
         self.workspace_service.start()
         try:
@@ -62,6 +66,13 @@ class BackendServer:
             self.httpd.server_close()
             self.httpd = None
         self.workspace_service.close()
+
+    def _write_port_file(self, port):
+        port_file = os.environ.get("ROSLYN_MCP_BACKEND_PORT_FILE")
+        if not port_file:
+            return
+        with open(port_file, "w", encoding="utf-8") as handle:
+            handle.write(str(port))
 
     def _build_handler(self):
         server = self

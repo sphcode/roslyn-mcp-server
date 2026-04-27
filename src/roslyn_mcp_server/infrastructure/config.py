@@ -21,7 +21,7 @@ def load_server_config(config_path):
         config["solution_or_project_path"], base_dir
     )
     config["listen_host"] = config.get("listen_host", "127.0.0.1")
-    config["listen_port"] = int(config.get("listen_port", 8765))
+    config["listen_port"] = int(config.get("listen_port", 0))
     roslyn_timeouts = dict(config.get("roslyn_timeouts", {}))
     roslyn_timeouts["request_seconds"] = int(
         roslyn_timeouts.get("request_seconds", 30)

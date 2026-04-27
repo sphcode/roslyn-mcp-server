@@ -101,6 +101,39 @@ def _call_mcp_tool(client, tool_name, arguments=None, *, retry_on_empty=False):
     return last_payload
 
 
+def _wait_for_mcp_ready(client, timeout_seconds=90):
+    deadline = time.time() + timeout_seconds
+    last_health_result = None
+
+    while time.time() < deadline:
+        health_result = _call_mcp_tool(client, "health")
+        last_health_result = health_result
+        if not health_result.get("ok", True):
+            return health_result
+
+        status = health_result.get("status")
+        if status in {"ready", "degraded", "failed"}:
+            return health_result
+        time.sleep(0.5)
+
+    if last_health_result is None:
+        return {
+            "ok": False,
+            "error": {
+                "type": "mcp_health_timeout",
+                "message": "Timed out waiting for MCP health.",
+            },
+        }
+
+    last_health_result = dict(last_health_result)
+    last_health_result["ok"] = False
+    last_health_result["error"] = {
+        "type": "mcp_health_timeout",
+        "message": f"Timed out waiting for MCP server readiness after {timeout_seconds} seconds.",
+    }
+    return last_health_result
+
+
 def build_tools(client):
     _create_agent, tool, _chat_open_ai, _read_terminal_prompt = _require_langgraph_stack()
 
@@ -339,7 +372,7 @@ def main(argv=None):
             )
             return 1
 
-        health_result = _call_mcp_tool(client, "health")
+        health_result = _wait_for_mcp_ready(client)
         if not health_result.get("ok", True):
             print(
                 f"MCP health check failed: {json.dumps(health_result, ensure_ascii=False)}",

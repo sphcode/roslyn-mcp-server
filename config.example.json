@@ -2,7 +2,7 @@
   "server_path": "/absolute/path/to/Microsoft.CodeAnalysis.LanguageServer",
   "solution_or_project_path": "/absolute/or/relative/path/to/your.sln",
   "listen_host": "127.0.0.1",
-  "listen_port": 8765,
+  "listen_port": 0,
   "roslyn_timeouts": {
     "request_seconds": 30,
     "search_symbols_seconds": 120,

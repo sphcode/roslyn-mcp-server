@@ -43,9 +43,14 @@ Copy `config.example.json` to `config.json` and edit the paths:
   "server_path": "/absolute/path/to/Microsoft.CodeAnalysis.LanguageServer",
   "solution_or_project_path": "/absolute/or/relative/path/to/your.sln",
   "listen_host": "127.0.0.1",
-  "listen_port": 8765
+  "listen_port": 0
 }
 ```
+
+Use `listen_port: 0` for normal MCP usage. The MCP server will start the
+internal Roslyn runtime on an available local port and connect to it
+automatically. Set a fixed port only when you need to debug or connect to the
+internal backend directly.
 
 ### Run the MCP Server
 
