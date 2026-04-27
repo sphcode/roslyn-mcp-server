@@ -12,7 +12,12 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-demo = ["langchain>=1,<2", "langgraph>=1,<2", "langchain-openai>=1,<2"]
+demo = [
+    "langchain>=1,<2",
+    "langgraph>=1,<2",
+    "langchain-openai>=1,<2",
+    "prompt-toolkit>=3,<4",
+]
 
 [project.scripts]
 roslyn-mcp-server = "roslyn_mcp_server.main:main"

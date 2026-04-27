@@ -53,13 +53,14 @@ def _require_langgraph_stack():
         from langchain.agents import create_agent
         from langchain.tools import tool
         from langchain_openai import ChatOpenAI
+        from prompt_toolkit import prompt as read_terminal_prompt
     except ImportError as exc:
         raise RuntimeError(
             "LangGraph demo dependencies are not installed. "
             "Run: python3 -m pip install -e '.[demo]'"
         ) from exc
 
-    return create_agent, tool, ChatOpenAI
+    return create_agent, tool, ChatOpenAI, read_terminal_prompt
 
 
 def _tool_error_payload(tool_name, error_type, message):
@@ -101,7 +102,7 @@ def _call_mcp_tool(client, tool_name, arguments=None, *, retry_on_empty=False):
 
 
 def build_tools(client):
-    _create_agent, tool, _chat_open_ai = _require_langgraph_stack()
+    _create_agent, tool, _chat_open_ai, _read_terminal_prompt = _require_langgraph_stack()
 
     @tool
     def health() -> str:
@@ -236,11 +237,11 @@ def build_tools(client):
     ]
 
 
-def _read_prompt():
-    if sys.stdin.isatty():
-        prompt = input("Prompt> ").strip()
-    else:
+def _read_prompt(read_terminal_prompt):
+    if not sys.stdin.isatty():
         prompt = sys.stdin.read().strip()
+    else:
+        prompt = read_terminal_prompt("Prompt> ").strip()
 
     if not prompt:
         raise RuntimeError("Prompt is empty. Enter a question in the terminal.")
@@ -269,12 +270,12 @@ def _print_messages(messages):
         print()
 
 
-def _run_repl(agent):
+def _run_repl(agent, read_terminal_prompt):
     state = {"messages": []}
 
     while True:
         try:
-            prompt = _read_prompt()
+            prompt = _read_prompt(read_terminal_prompt)
         except EOFError:
             print("\nExiting.", file=sys.stderr)
             return 0
@@ -308,7 +309,7 @@ def main(argv=None):
     demo_config = _load_config(config_path)
 
     try:
-        create_agent, _tool, ChatOpenAI = _require_langgraph_stack()
+        create_agent, _tool, ChatOpenAI, read_terminal_prompt = _require_langgraph_stack()
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -365,7 +366,7 @@ def main(argv=None):
             system_prompt=SYSTEM_PROMPT,
         )
         print("Interactive chat started. Use /reset to clear context, /exit to quit.")
-        return _run_repl(agent)
+        return _run_repl(agent, read_terminal_prompt)
     finally:
         client.close()
 

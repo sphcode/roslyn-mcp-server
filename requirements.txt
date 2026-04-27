@@ -1,7 +1,0 @@
-# Runtime dependencies are standard-library only.
-# Development dependencies:
-# pytest>=8
-# Optional LangGraph demo dependencies:
-# langchain>=1,<2
-# langgraph>=1,<2
-# langchain-openai>=1,<2
