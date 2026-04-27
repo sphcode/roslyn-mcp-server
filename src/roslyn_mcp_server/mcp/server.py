@@ -28,9 +28,6 @@ class RoslynMcpServer:
         self._protocol_version = None
         self._tool_handlers = {
             "health": self._call_health,
-            "find_definition": self._call_find_definition,
-            "find_references": self._call_find_references,
-            "find_implementations": self._call_find_implementations,
             "find_definition_by_symbol": self._call_find_definition_by_symbol,
             "find_references_by_symbol": self._call_find_references_by_symbol,
             "find_implementations_by_symbol": self._call_find_implementations_by_symbol,
@@ -38,7 +35,6 @@ class RoslynMcpServer:
             "search_symbols": self._call_search_symbols,
             "read_symbol": self._call_read_symbol,
             "read_file": self._call_read_file,
-            "read_span": self._call_read_span,
         }
 
     def serve_forever(self):
@@ -160,31 +156,6 @@ class RoslynMcpServer:
 
     def _call_health(self, _arguments):
         response = self.backend_client.health()
-        return self._unwrap_backend_response(response)
-
-    def _call_find_definition(self, arguments):
-        response = self.backend_client.find_definition(
-            file_path=arguments["file_path"],
-            line=int(arguments["line"]),
-            character=int(arguments["character"]),
-        )
-        return self._unwrap_backend_response(response)
-
-    def _call_find_references(self, arguments):
-        response = self.backend_client.find_references(
-            file_path=arguments["file_path"],
-            line=int(arguments["line"]),
-            character=int(arguments["character"]),
-            include_declaration=bool(arguments.get("include_declaration", True)),
-        )
-        return self._unwrap_backend_response(response)
-
-    def _call_find_implementations(self, arguments):
-        response = self.backend_client.find_implementations(
-            file_path=arguments["file_path"],
-            line=int(arguments["line"]),
-            character=int(arguments["character"]),
-        )
         return self._unwrap_backend_response(response)
 
     def _call_find_definition_by_symbol(self, arguments):
@@ -340,16 +311,6 @@ class RoslynMcpServer:
         }
         return payload
 
-    def _call_read_span(self, arguments):
-        response = self.backend_client.read_span(
-            file_path=arguments["file_path"],
-            start_line=int(arguments["start_line"]),
-            start_character=int(arguments["start_character"]),
-            end_line=int(arguments["end_line"]),
-            end_character=int(arguments["end_character"]),
-        )
-        return self._unwrap_backend_response(response)
-
     def _tool_failure_result(self, error_type, message, details=None):
         payload = {
             "ok": False,
@@ -489,49 +450,6 @@ class RoslynMcpServer:
                 },
             },
             {
-                "name": "find_definition",
-                "description": "Find the definition location for a C# symbol at a 0-based LSP position.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {"type": "string"},
-                        "line": {"type": "integer", "minimum": 0},
-                        "character": {"type": "integer", "minimum": 0},
-                    },
-                    "required": ["file_path", "line", "character"],
-                    "additionalProperties": False,
-                },
-            },
-            {
-                "name": "find_references",
-                "description": "Find references for a C# symbol at a 0-based LSP position.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {"type": "string"},
-                        "line": {"type": "integer", "minimum": 0},
-                        "character": {"type": "integer", "minimum": 0},
-                        "include_declaration": {"type": "boolean"},
-                    },
-                    "required": ["file_path", "line", "character"],
-                    "additionalProperties": False,
-                },
-            },
-            {
-                "name": "find_implementations",
-                "description": "Find implementation locations for a C# symbol at a 0-based LSP position.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {"type": "string"},
-                        "line": {"type": "integer", "minimum": 0},
-                        "character": {"type": "integer", "minimum": 0},
-                    },
-                    "required": ["file_path", "line", "character"],
-                    "additionalProperties": False,
-                },
-            },
-            {
                 "name": "find_definition_by_symbol",
                 "description": "Find definition locations for a previously discovered symbol_handle.",
                 "inputSchema": {
@@ -617,28 +535,6 @@ class RoslynMcpServer:
                         "end_line": {"type": "integer", "minimum": 0},
                     },
                     "required": ["file_path"],
-                    "additionalProperties": False,
-                },
-            },
-            {
-                "name": "read_span",
-                "description": "Read a source span from disk using 0-based start and end positions.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {"type": "string"},
-                        "start_line": {"type": "integer", "minimum": 0},
-                        "start_character": {"type": "integer", "minimum": 0},
-                        "end_line": {"type": "integer", "minimum": 0},
-                        "end_character": {"type": "integer", "minimum": 0},
-                    },
-                    "required": [
-                        "file_path",
-                        "start_line",
-                        "start_character",
-                        "end_line",
-                        "end_character",
-                    ],
                     "additionalProperties": False,
                 },
             },

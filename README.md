@@ -88,24 +88,6 @@ The first batch of tools should be:
 - `read_file`
   - read a file, optionally by line range
 
-These tools are being implemented incrementally. The current server is in a transitional state where both:
-
-- newer symbol-oriented tools
-- older position-based tools
-
-may coexist for a period of time.
-
-### Transitional State
-
-The current implementation still contains lower-level position-based tools inherited from the underlying LSP model. Those are implementation-oriented and will be phased down in favor of the symbol-oriented MCP surface above.
-
-Examples of lower-level tools that should not remain the primary MCP interface:
-
-- `find_definition(file_path, line, character)`
-- `find_references(file_path, line, character)`
-- `find_implementations(file_path, line, character)`
-- `read_span(file_path, start_line, start_character, end_line, end_character)`
-
 ### Coordinate System
 
 Where coordinates do appear in tool results, they follow LSP semantics:
